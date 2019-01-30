@@ -533,7 +533,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 		sum += balances.Balances[i]
 
 		// add the address as an input
-		if balances.Balances[i] <= 0 {
+		if balances.Balances[i] == 0 {
 			continue
 		}
 		addAsInput(&api.Input{
