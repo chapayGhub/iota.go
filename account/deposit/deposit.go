@@ -11,19 +11,20 @@ import (
 	"time"
 )
 
+// ErrAddressInvalid is returned when an address is invalid when parsed from a serialized form.
 var ErrAddressInvalid = errors.New("invalid address")
 
+// Conditions defines a conditional deposit request.
 type Conditions struct {
 	Request
 	Address Hash `json:"address"`
 }
 
-type ConditionField string
-
+// Defines the names of the condition fields in a magnet link.
 const (
-	ConditionExpires  = "t"
-	ConditionMultiUse = "m"
-	ConditionAmount   = "am"
+	MagnetLinkTimeoutField  = "t"
+	MagnetLinkMultiUseField = "m"
+	MagnetLinkAmountField   = "am"
 )
 
 // AsMagnetLink converts the conditions into a magnet link URL.
@@ -55,14 +56,14 @@ func ParseMagnetLink(s string) (*Conditions, error) {
 	if len(link.Host) != consts.AddressWithChecksumTrytesSize {
 		return nil, errors.Wrap(ErrAddressInvalid, "address must be 90 trytes long")
 	}
-	expiresSeconds, err := strconv.ParseInt(query.Get(ConditionExpires), 10, 64)
+	expiresSeconds, err := strconv.ParseInt(query.Get(MagnetLinkTimeoutField), 10, 64)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid expire timestamp")
 	}
 	expire := time.Unix(expiresSeconds, 0)
 	cond.TimeoutAt = &expire
-	cond.MultiUse = query.Get(ConditionMultiUse) == "true"
-	expectedAmount, err := strconv.ParseUint(query.Get(ConditionAmount), 10, 64)
+	cond.MultiUse = query.Get(MagnetLinkMultiUseField) == "true"
+	expectedAmount, err := strconv.ParseUint(query.Get(MagnetLinkAmountField), 10, 64)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid expected amount")
 	}

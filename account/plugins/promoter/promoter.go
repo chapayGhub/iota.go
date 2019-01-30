@@ -36,6 +36,7 @@ type PromotionReattachmentEvent struct {
 	ReattachmentTailTxHash Hash `json:"reattachment_tail_tx_hash"`
 }
 
+// NewPromoter creates a new Promoter.
 func NewPromoter(
 	api *api.API, store store.Store, eventMachine event.EventMachine, clock account.Clock,
 	interval time.Duration, depth uint64, mwm uint64,
@@ -50,6 +51,8 @@ func NewPromoter(
 	}
 }
 
+// Promoter is an account plugin which takes care of trying to get pending transfers
+// to get confirmed by issuing promotion transactions and creating reattachments.
 type Promoter struct {
 	interval time.Duration
 	api      *api.API

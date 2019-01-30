@@ -4,6 +4,7 @@ import (
 	"sync"
 )
 
+// EventMachine defines an object which registers listeners and emits events.
 type EventMachine interface {
 	// Emit emits the given event with the given data.
 	Emit(data interface{}, event Event)
@@ -13,6 +14,7 @@ type EventMachine interface {
 	UnregisterListener(uint64) error
 }
 
+// NewEventMachine creates a new EventMachine.
 func NewEventMachine() EventMachine {
 	return &eventmachine{
 		listeners: make(map[Event]map[uint64]chan interface{}),
@@ -65,9 +67,11 @@ func (em *eventmachine) UnregisterListener(id uint64) error {
 	return nil
 }
 
+// Event is an event emitted by the account or account plugin.
 type Event int64
 
-const ( // emitted when a transfer was broadcasted
+const (
+	// emitted when a transfer was broadcasted
 	EventSendingTransfer Event = iota
 	// emitted for internal errors of all kinds
 	EventError
@@ -75,7 +79,7 @@ const ( // emitted when a transfer was broadcasted
 	EventShutdown
 )
 
-// an event machine not emitting anything
+// DiscardEventMachine is an EventMachine which discards all emits.
 type DiscardEventMachine struct{}
 
 func (*DiscardEventMachine) Emit(data interface{}, event Event)                            {}

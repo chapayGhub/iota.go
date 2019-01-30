@@ -31,6 +31,7 @@ const (
 	EventReceivedMessage event.Event = 103
 )
 
+// NewTransferPoller creates a new TransferPoller.
 func NewTransferPoller(
 	api *api.API, store store.Store, eventMachine event.EventMachine,
 	seedProv account.SeedProvider, receiveEventFilter ReceiveEventFilter, interval time.Duration,
@@ -47,6 +48,8 @@ func NewTransferPoller(
 	}
 }
 
+// TransferPoller is an account plugin which takes care of checking pending transfers for confirmation
+// and checking incoming transfers.
 type TransferPoller struct {
 	api                *api.API
 	store              store.Store

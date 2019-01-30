@@ -26,6 +26,7 @@ type EventListener struct {
 	Shutdown         chan struct{}
 }
 
+// NewEventListener creates a new EventListener using the given EventMachine.
 func NewEventListener(em event.EventMachine) *EventListener {
 	return &EventListener{em: em, ids: []uint64{}}
 }
