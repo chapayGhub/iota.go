@@ -545,7 +545,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 		// mark the address for removal as it should be freed from the store
 		markForRemoval(s.keyIndex)
-		if sum > transferValue && !balanceCheck {
+		if sum >= transferValue && !balanceCheck {
 			break
 		}
 	}
@@ -580,7 +580,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 				Security: secSelect.req.SecurityLevel,
 				Balance:  balance,
 			})
-			if sum > transferValue && !balanceCheck {
+			if sum >= transferValue && !balanceCheck {
 				break
 			}
 		}
