@@ -390,7 +390,7 @@ func (acc *account) totalBalance() (uint64, error) {
 	addrs := make(Hashes, len(state.DepositRequests))
 	var i int
 	for keyIndex, req := range state.DepositRequests {
-		addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+		addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
 		addrs[i] = addr
 		i++
 	}
@@ -474,7 +474,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 			if req.ExpectedAmount == nil {
 				panic("remainder address in system without 'expected amount'")
 			}
-			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
 			primaryAddrs = append(primaryAddrs, addr)
 			primarySelection = append(primarySelection, selection{keyIndex, req})
 			continue
@@ -482,7 +482,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 		// timed out
 		if now.After(*req.TimeoutAt) {
-			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
 			secondaryAddrs = append(secondaryAddrs, addr)
 			secondarySelection = append(secondarySelection, selection{keyIndex, req})
 			continue
@@ -495,14 +495,14 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 			if req.ExpectedAmount == nil {
 				continue
 			}
-			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
 			primaryAddrs = append(primaryAddrs, addr)
 			primarySelection = append(primarySelection, selection{keyIndex, req})
 			continue
 		}
 
 		// single
-		addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+		addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
 		primaryAddrs = append(primaryAddrs, addr)
 		primarySelection = append(primarySelection, selection{keyIndex, req})
 	}
