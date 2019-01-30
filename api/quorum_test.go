@@ -172,7 +172,9 @@ var _ = Describe("Quorum", func() {
 			res := &fakereqres{}
 			err := provider.Send(&fakereqres{Val: 0}, res)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal(errorMsg))
+			reqErr, ok := err.(*ErrRequestError)
+			Expect(ok).To(BeTrue())
+			Expect(reqErr.ErrorMessage).To(Equal(errorMsg))
 		})
 	})
 
