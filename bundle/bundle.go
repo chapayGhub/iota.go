@@ -58,7 +58,7 @@ type BundleEntry struct {
 // BundleEntries are a slice of BundleEntry.
 type BundleEntries = []BundleEntry
 
-// AsTransfers are a slice of Transfer.
+// Transfers are a slice of Transfer.
 type Transfers []Transfer
 
 // Transfer represents the data/value to transfer to an address.
