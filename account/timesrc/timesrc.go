@@ -23,7 +23,7 @@ type NTPTimeSource struct {
 	server string
 }
 
-// NewNTPClock creates a new TimeSource using the given NTP server.
+// NewNTPTimeSource creates a new TimeSource using the given NTP server.
 func NewNTPTimeSource(ntpServer string) *NTPTimeSource {
 	return &NTPTimeSource{ntpServer}
 }
