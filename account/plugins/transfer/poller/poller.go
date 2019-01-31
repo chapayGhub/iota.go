@@ -41,7 +41,7 @@ func NewTransferPoller(
 	}
 	return &TransferPoller{
 		api: api, store: store, interval: interval,
-		receiveEventfilter: receiveEventFilter,
+		receiveEventFilter: receiveEventFilter,
 		em:                 eventMachine, seedProvider: seedProv,
 		shutdown: make(chan struct{}),
 		syncer:   make(chan struct{}),
@@ -55,11 +55,15 @@ type TransferPoller struct {
 	store              store.Store
 	em                 event.EventMachine
 	seedProvider       account.SeedProvider
-	receiveEventfilter ReceiveEventFilter
+	receiveEventFilter ReceiveEventFilter
 	interval           time.Duration
 	acc                account.Account
 	syncer             chan struct{}
 	shutdown           chan struct{}
+}
+
+func (tp *TransferPoller) Name() string {
+	return "transfer-poller"
 }
 
 func (tp *TransferPoller) Start(acc account.Account) error {
@@ -222,7 +226,7 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 	}
 
 	// create the events to emit in the event system
-	tp.receiveEventfilter(tp.em, bndls, depositAddresses, spentAddresses)
+	tp.receiveEventFilter(tp.em, bndls, depositAddresses, spentAddresses)
 }
 
 type ReceiveEventTuple struct {

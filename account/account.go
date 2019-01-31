@@ -68,13 +68,18 @@ func (recps Recipients) AsTransfers() bundle.Transfers {
 	return transfers
 }
 
-func newAccount(setts *Settings) (Account, error) {
-	seed, err := setts.seedProv.Seed()
+// NewAccount creates a new account. If settings are nil, the account is
+// initialized with the default settings provided by DefaultSettings().
+func NewAccount(setts *Settings) (Account, error) {
+	seed, err := setts.SeedProv.Seed()
 	if err != nil {
 		return nil, err
 	}
 	if err := validators.Validate(validators.ValidateSeed(seed)); err != nil {
 		return nil, err
+	}
+	if setts == nil {
+		setts = DefaultSettings()
 	}
 	return &account{
 		id:    fmt.Sprintf("%x", sha256.Sum256([]byte(seed))),
@@ -133,7 +138,7 @@ func (acc *account) AllocateDepositRequest(req *deposit.Request) (*deposit.Condi
 		return nil, ErrTimeoutNotSpecified
 	}
 
-	currentTime, err := acc.setts.clock.Now()
+	currentTime, err := acc.setts.TimeSource.Time()
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +174,7 @@ func (acc *account) IsNew() (bool, error) {
 	if !acc.running {
 		return false, ErrAccountNotRunning
 	}
-	state, err := acc.setts.store.LoadAccount(acc.id)
+	state, err := acc.setts.Store.LoadAccount(acc.id)
 	if err != nil {
 		return false, err
 	}
@@ -203,7 +208,7 @@ func (acc *account) Start() error {
 	acc.mu.Lock()
 	defer acc.mu.Unlock()
 	// ensure account is known to the store
-	state, err := acc.setts.store.LoadAccount(acc.id)
+	state, err := acc.setts.Store.LoadAccount(acc.id)
 	if err != nil {
 		return errors.Wrap(err, "unable to read latest used key index in startup")
 	}
@@ -230,12 +235,12 @@ func (acc *account) Shutdown() error {
 		return errors.Wrapf(err, "unable to shutdown plugin in shutdown op.")
 	}
 
-	acc.setts.eventMachine.Emit(struct{}{}, event.EventShutdown)
+	acc.setts.EventMachine.Emit(struct{}{}, event.EventShutdown)
 	return nil
 }
 
 func (acc *account) startPlugins() error {
-	for _, p := range acc.setts.plugins {
+	for _, p := range acc.setts.Plugins {
 		if err := p.Start(acc); err != nil {
 			return errors.Wrapf(err, "unable to start plugin %T", p)
 		}
@@ -244,7 +249,7 @@ func (acc *account) startPlugins() error {
 }
 
 func (acc *account) shutdownPlugins() error {
-	for _, p := range acc.setts.plugins {
+	for _, p := range acc.setts.Plugins {
 		if err := p.Shutdown(); err != nil {
 			return errors.Wrapf(err, "unable to shutdown plugin %T", p)
 		}
@@ -253,22 +258,22 @@ func (acc *account) shutdownPlugins() error {
 }
 
 func (acc *account) allocateDepositRequest(req *deposit.Request) (*deposit.Conditions, error) {
-	seed, err := acc.setts.seedProv.Seed()
+	seed, err := acc.setts.SeedProv.Seed()
 	if err != nil {
 		return nil, err
 	}
 
 	acc.lastKeyIndex++
-	addr, err := address.GenerateAddress(seed, acc.lastKeyIndex, acc.setts.securityLevel, true)
+	addr, err := address.GenerateAddress(seed, acc.lastKeyIndex, acc.setts.SecurityLevel, true)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to generate address in address gen. function")
 	}
-	if err := acc.setts.store.WriteIndex(acc.id, acc.lastKeyIndex); err != nil {
+	if err := acc.setts.Store.WriteIndex(acc.id, acc.lastKeyIndex); err != nil {
 		return nil, errors.Wrapf(err, "unable to store next index (%d) in the store", acc.lastKeyIndex)
 	}
 
-	storedReq := &store.StoredDepositRequest{SecurityLevel: acc.setts.securityLevel, Request: *req}
-	if err := acc.setts.store.AddDepositRequest(acc.id, acc.lastKeyIndex, storedReq); err != nil {
+	storedReq := &store.StoredDepositRequest{SecurityLevel: acc.setts.SecurityLevel, Request: *req}
+	if err := acc.setts.Store.AddDepositRequest(acc.id, acc.lastKeyIndex, storedReq); err != nil {
 		return nil, err
 	}
 
@@ -284,7 +289,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 
 	if transferSum > 0 {
 		// gather the total sum, inputs, addresses to remove from the store
-		sum, ins, rem, err := acc.setts.inputSelectionStrategy(acc, transferSum, false)
+		sum, ins, rem, err := acc.setts.InputSelectionStrat(acc, transferSum, false)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to perform input selection in send op.")
 		}
@@ -304,7 +309,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 	}
 
 	transfers := targets.AsTransfers()
-	currentTime, err := acc.setts.clock.Now()
+	currentTime, err := acc.setts.TimeSource.Time()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get current time in send op.")
 	}
@@ -316,22 +321,22 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		Timestamp:        &ts,
 	}
 
-	seed, err := acc.setts.seedProv.Seed()
+	seed, err := acc.setts.SeedProv.Seed()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get seed from seed provider in send op.")
 	}
 
-	bundleTrytes, err := acc.setts.api.PrepareTransfers(seed, transfers, opts)
+	bundleTrytes, err := acc.setts.API.PrepareTransfers(seed, transfers, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to prepare transfers in send op.")
 	}
 
-	tips, err := acc.setts.api.GetTransactionsToApprove(acc.setts.depth)
+	tips, err := acc.setts.API.GetTransactionsToApprove(acc.setts.Depth)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to GTTA in send op.")
 	}
 
-	powedTrytes, err := acc.setts.api.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, acc.setts.mwm, bundleTrytes)
+	powedTrytes, err := acc.setts.API.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, acc.setts.MWM, bundleTrytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "performing PoW in send op. failed")
 	}
@@ -342,11 +347,11 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 	}
 
 	// add the new transfer to the db
-	if err := acc.setts.store.AddPendingTransfer(acc.id, tailTx.Hash, powedTrytes, forRemoval...); err != nil {
+	if err := acc.setts.Store.AddPendingTransfer(acc.id, tailTx.Hash, powedTrytes, forRemoval...); err != nil {
 		return nil, errors.Wrap(err, "unable to store pending transfer in send op.")
 	}
 
-	bndlTrytes, err := acc.setts.api.StoreAndBroadcast(powedTrytes)
+	bndlTrytes, err := acc.setts.API.StoreAndBroadcast(powedTrytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to store/broadcast bundle in send op.")
 	}
@@ -356,17 +361,17 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		return nil, err
 	}
 
-	acc.setts.eventMachine.Emit(bndl, event.EventSendingTransfer)
+	acc.setts.EventMachine.Emit(bndl, event.EventSendingTransfer)
 	return bndl, nil
 }
 
 func (acc *account) availableBalance() (uint64, error) {
-	balance, _, _, err := acc.setts.inputSelectionStrategy(acc, 0, true)
+	balance, _, _, err := acc.setts.InputSelectionStrat(acc, 0, true)
 	return balance, err
 }
 
 func (acc *account) totalBalance() (uint64, error) {
-	state, err := acc.setts.store.LoadAccount(acc.id)
+	state, err := acc.setts.Store.LoadAccount(acc.id)
 	if err != nil {
 		return 0, errors.Wrap(err, "unable to load account state for querying total balance")
 	}
@@ -376,13 +381,13 @@ func (acc *account) totalBalance() (uint64, error) {
 		return 0, nil
 	}
 
-	solidSubtangleMilestone, err := acc.setts.api.GetLatestSolidSubtangleMilestone()
+	solidSubtangleMilestone, err := acc.setts.API.GetLatestSolidSubtangleMilestone()
 	if err != nil {
 		return 0, errors.Wrap(err, "unable to fetch latest solid subtangle milestone for querying total balance")
 	}
 	subtangleHash := solidSubtangleMilestone.LatestSolidSubtangleMilestone
 
-	seed, err := acc.setts.seedProv.Seed()
+	seed, err := acc.setts.SeedProv.Seed()
 	if err != nil {
 		return 0, errors.Wrap(err, "unable to get seed from seed provider for computing total balance")
 	}
@@ -395,7 +400,7 @@ func (acc *account) totalBalance() (uint64, error) {
 		i++
 	}
 
-	balances, err := acc.setts.api.GetBalances(addrs, 100, subtangleHash)
+	balances, err := acc.setts.API.GetBalances(addrs, 100, subtangleHash)
 	if err != nil {
 		return 0, errors.Wrap(err, "unable to fetch balances for computing total balance")
 	}
@@ -409,7 +414,7 @@ func (acc *account) totalBalance() (uint64, error) {
 
 // selects fulfilled and timed out deposit addresses as inputs.
 func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool) (uint64, []api.Input, []uint64, error) {
-	depositRequests, err := acc.setts.store.GetDepositRequests(acc.id)
+	depositRequests, err := acc.setts.Store.GetDepositRequests(acc.id)
 	if err != nil {
 		return 0, nil, nil, errors.Wrap(err, "unable to load account state for input selection")
 	}
@@ -424,14 +429,14 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 	}
 
 	// get the current solid subtangle milestone for doing each getBalance query with the same milestone
-	solidSubtangleMilestone, err := acc.setts.api.GetLatestSolidSubtangleMilestone()
+	solidSubtangleMilestone, err := acc.setts.API.GetLatestSolidSubtangleMilestone()
 	if err != nil {
 		return 0, nil, nil, errors.Wrap(err, "unable to fetch latest solid subtangle milestone for input selection")
 	}
 	subtangleHash := solidSubtangleMilestone.LatestSolidSubtangleMilestone
 
 	// get current time to check for timed out addresses
-	now, err := acc.setts.clock.Now()
+	now, err := acc.setts.TimeSource.Time()
 	if err != nil {
 		return 0, nil, nil, errors.Wrap(err, "unable to get time for doing input selection")
 	}
@@ -462,7 +467,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 		toRemove = append(toRemove, keyIndex)
 	}
 
-	seed, err := acc.setts.seedProv.Seed()
+	seed, err := acc.setts.SeedProv.Seed()
 	if err != nil {
 		return 0, nil, nil, errors.Wrap(err, "unable to get seed from seed provider for doing input selection")
 	}
@@ -509,7 +514,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 	// get the balance of all addresses (also secondary) in one go
 	toQuery := append(primaryAddrs, secondaryAddrs...)
-	balances, err := acc.setts.api.GetBalances(toQuery, 100, subtangleHash)
+	balances, err := acc.setts.API.GetBalances(toQuery, 100, subtangleHash)
 	if err != nil {
 		return 0, nil, nil, errors.Wrap(err, "unable to fetch balances of primary selected addresses for input selection")
 	}
@@ -598,7 +603,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 func (acc *account) hasIncomingConsistentValueTransfer(addr Hash) (bool, error) {
 	var has bool
-	bndls, err := acc.setts.api.GetBundlesFromAddresses(Hashes{addr}, true)
+	bndls, err := acc.setts.API.GetBundlesFromAddresses(Hashes{addr}, true)
 	if err != nil {
 		return false, err
 	}
@@ -632,7 +637,7 @@ func (acc *account) hasIncomingConsistentValueTransfer(addr Hash) (bool, error) 
 		// and is depositing something onto this address.
 		// lets check it for its consistency
 		hash := bndls[i][0].Hash
-		consistent, _, err := acc.setts.api.CheckConsistency(hash)
+		consistent, _, err := acc.setts.API.CheckConsistency(hash)
 		if err != nil {
 			return false, errors.Wrapf(err, "unable to check consistency of tx %s in incoming consistent transfer check", hash)
 		}

@@ -2,6 +2,7 @@ package account_test
 
 import (
 	"github.com/h2non/gock"
+	"github.com/iotaledger/iota.go/account/builder"
 	"github.com/iotaledger/iota.go/account/deposit"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/event/listener"
@@ -26,7 +27,7 @@ const usedSecLvl = consts.SecurityLevelLow
 
 type fakeclock struct{}
 
-func (fc *fakeclock) Now() (time.Time, error) {
+func (fc *fakeclock) Time() (time.Time, error) {
 	return time.Date(2018, time.November, 22, 21, 53, 0, 0, time.UTC), nil
 }
 
@@ -73,14 +74,16 @@ var _ = Describe("account", func() {
 		poll = poller.NewTransferPoller(
 			api, st, em,
 			account.NewInMemorySeedProvider(seed), poller.NewPerTailReceiveEventFilter(), time.Duration(60)*time.Second)
-		acc, err = account.New(api, st).
-			Depth(3).
-			MWM(9).
-			SecurityLevel(usedSecLvl).
-			Clock(&fakeclock{}).
-			Seed(seed).
-			With(poll).
+		acc, err = builder.NewBuilder().
+			WithAPI(api).
+			WithStore(st).
+			WithDepth(3).
+			WithMWM(9).
+			WithSecurityLevel(usedSecLvl).
+			WithTimeSource(&fakeclock{}).
 			WithEvents(em).
+			WithPlugins(poll).
+			WithSeed(seed).
 			Build()
 		if err != nil {
 			panic(err)
@@ -90,19 +93,11 @@ var _ = Describe("account", func() {
 
 	Context("account creation", func() {
 		It("successfully creates accounts given valid parameters/options", func() {
-			var err error
-			acc, err = account.New(api, inmemory.NewInMemoryStore()).
-				Depth(3).
-				MWM(9).
-				SecurityLevel(usedSecLvl).
-				Seed(seed).
-				Build()
-			acc.Start()
+			newAccount()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(acc.IsNew()).To(BeTrue())
+			Expect(acc.Shutdown()).ToNot(HaveOccurred())
 		})
-
-		// TODO: write test for invalid options
 	})
 
 	Context("Addresses", func() {

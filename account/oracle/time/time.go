@@ -2,9 +2,9 @@ package time
 
 import (
 	"fmt"
-	"github.com/iotaledger/iota.go/account"
 	"github.com/iotaledger/iota.go/account/deposit"
 	"github.com/iotaledger/iota.go/account/oracle"
+	"github.com/iotaledger/iota.go/account/timesrc"
 	"time"
 )
 
@@ -13,17 +13,17 @@ const dateFormat = "2006-02-01 15:04:05"
 // NewTimeDecider creates a new OracleSource which uses the current time to decide whether
 // it makes sense to send a transaction. remainingTimeThreshold defines the maximum allowed
 // remaining time between now and the conditions' timeout.
-func NewTimeDecider(clock account.Clock, remainingTimeThreshold time.Duration) oracle.OracleSource {
-	return &timedecider{clock, remainingTimeThreshold}
+func NewTimeDecider(timesource timesrc.TimeSource, remainingTimeThreshold time.Duration) oracle.OracleSource {
+	return &timedecider{timesource, remainingTimeThreshold}
 }
 
 type timedecider struct {
-	clock                  account.Clock
+	timesource             timesrc.TimeSource
 	remainingTimeThreshold time.Duration
 }
 
 func (td *timedecider) Ok(conds *deposit.Conditions) (bool, string, error) {
-	now, err := td.clock.Now()
+	now, err := td.timesource.Time()
 	if err != nil {
 		return false, "", err
 	}

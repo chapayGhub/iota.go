@@ -4,6 +4,7 @@ import (
 	"github.com/iotaledger/iota.go/account"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
+	"github.com/iotaledger/iota.go/account/timesrc"
 	"github.com/iotaledger/iota.go/api"
 	"github.com/iotaledger/iota.go/bundle"
 	"github.com/iotaledger/iota.go/transaction"
@@ -38,14 +39,14 @@ type PromotionReattachmentEvent struct {
 
 // NewPromoter creates a new Promoter.
 func NewPromoter(
-	api *api.API, store store.Store, eventMachine event.EventMachine, clock account.Clock,
+	api *api.API, store store.Store, eventMachine event.EventMachine, timesource timesrc.TimeSource,
 	interval time.Duration, depth uint64, mwm uint64,
 ) *Promoter {
 	if eventMachine == nil {
 		eventMachine = &event.DiscardEventMachine{}
 	}
 	return &Promoter{
-		interval: interval, em: eventMachine, clock: clock,
+		interval: interval, em: eventMachine, timeSource: timesource,
 		api: api, store: store, depth: depth, mwm: mwm,
 		syncer: make(chan struct{}), shutdown: make(chan struct{}),
 	}
@@ -54,16 +55,20 @@ func NewPromoter(
 // Promoter is an account plugin which takes care of trying to get pending transfers
 // to get confirmed by issuing promotion transactions and creating reattachments.
 type Promoter struct {
-	interval time.Duration
-	api      *api.API
-	store    store.Store
-	em       event.EventMachine
-	clock    account.Clock
-	depth    uint64
-	mwm      uint64
-	acc      account.Account
-	syncer   chan struct{}
-	shutdown chan struct{}
+	interval   time.Duration
+	api        *api.API
+	store      store.Store
+	em         event.EventMachine
+	timeSource timesrc.TimeSource
+	depth      uint64
+	mwm        uint64
+	acc        account.Account
+	syncer     chan struct{}
+	shutdown   chan struct{}
+}
+
+func (p *Promoter) Name() string {
+	return "promoter-reattacher"
 }
 
 func (p *Promoter) Start(acc account.Account) error {
@@ -116,8 +121,8 @@ func (p *Promoter) Shutdown() error {
 
 const approxAboveMaxDepthMinutes = 5
 
-func aboveMaxDepth(clock account.Clock, ts time.Time) (bool, error) {
-	currentTime, err := clock.Now()
+func aboveMaxDepth(timesource timesrc.TimeSource, ts time.Time) (bool, error) {
+	currentTime, err := timesource.Time()
 	if err != nil {
 		return false, err
 	}
@@ -231,7 +236,7 @@ func (p *Promoter) promote() {
 				continue
 			}
 
-			if above, err := aboveMaxDepth(p.clock, time.Unix(int64(tx.Timestamp), 0)); !above || err != nil {
+			if above, err := aboveMaxDepth(p.timeSource, time.Unix(int64(tx.Timestamp), 0)); !above || err != nil {
 				continue
 			}
 

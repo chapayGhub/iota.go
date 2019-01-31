@@ -6,4 +6,6 @@ type Plugin interface {
 	Start(acc Account) error
 	// Shutdown instructs the plugin to terminate.
 	Shutdown() error
+	// Name returns the name of the plugin.
+	Name() string
 }
