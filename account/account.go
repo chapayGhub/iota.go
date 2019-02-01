@@ -286,6 +286,55 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 	var err error
 	transferSum := targets.Sum()
 	forRemoval := []uint64{}
+	var success bool
+
+	seed, err := acc.setts.SeedProv.Seed()
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to get seed from seed provider in send op.")
+	}
+
+	transfers := targets.AsTransfers()
+	currentTime, err := acc.setts.TimeSource.Time()
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to get current time in send op.")
+	}
+
+	// ensure that the allocated remainder address is deleted from the
+	// store if the send operation wasn't successful.
+	defer func() {
+		if remainderAddress == nil || success {
+			return
+		}
+		reqs, err := acc.setts.Store.GetDepositRequests(acc.id)
+		if err != nil {
+			return
+		}
+		// while iterating over all CDRs in order to find the one used for the remainder address is slow,
+		// this operation only happens rarely, so there's no issue.
+		croppedRemainderAddr := (*remainderAddress)[:81]
+		var remainderAddrKeyIndex *uint64
+		for keyIndex, req := range reqs {
+			addr, err := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+			if err != nil {
+				continue
+			}
+			if addr == croppedRemainderAddr {
+				remainderAddrKeyIndex = &keyIndex
+				break
+			}
+		}
+
+		// shouldn't be possible
+		if remainderAddrKeyIndex == nil {
+			return
+		}
+
+		// remove allocated remainder address from store
+		if err := acc.setts.Store.RemoveDepositRequest(acc.id, *remainderAddrKeyIndex); err != nil {
+			err = errors.Wrap(err, "unable to cleanup allocated remainder addr during failed send op.")
+			acc.setts.EventMachine.Emit(err, event.EventError)
+		}
+	}()
 
 	if transferSum > 0 {
 		// gather the total sum, inputs, addresses to remove from the store
@@ -308,22 +357,11 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		}
 	}
 
-	transfers := targets.AsTransfers()
-	currentTime, err := acc.setts.TimeSource.Time()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to get current time in send op.")
-	}
-
 	ts := uint64(currentTime.UnixNano() / int64(time.Second))
 	opts := api.PrepareTransfersOptions{
 		Inputs:           inputs,
 		RemainderAddress: remainderAddress,
 		Timestamp:        &ts,
-	}
-
-	seed, err := acc.setts.SeedProv.Seed()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to get seed from seed provider in send op.")
 	}
 
 	bundleTrytes, err := acc.setts.API.PrepareTransfers(seed, transfers, opts)
@@ -350,6 +388,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 	if err := acc.setts.Store.AddPendingTransfer(acc.id, tailTx.Hash, powedTrytes, forRemoval...); err != nil {
 		return nil, errors.Wrap(err, "unable to store pending transfer in send op.")
 	}
+	success = true
 
 	bndlTrytes, err := acc.setts.API.StoreAndBroadcast(powedTrytes)
 	if err != nil {
