@@ -53,7 +53,7 @@ func defaultConfig(cnf *Config) *Config {
 func defaultMongoDBConf() []*options.ClientOptions {
 	return []*options.ClientOptions{
 		{
-			WriteConcern: writeconcern.New(writeconcern.J(true), writeconcern.WMajority()),
+			WriteConcern: writeconcern.New(writeconcern.J(true), writeconcern.WMajority(), writeconcern.WTimeout(5*time.Second)),
 			ReadConcern:  readconcern.Majority(),
 		},
 	}
@@ -65,7 +65,7 @@ func defaultCtxProvider() context.Context {
 }
 
 // NewMongoStore creates a new MongoDB store. If no MongoDB client options are defined,
-// the client will be configured with a majority read/write concern, journal write acknowledgement.
+// the client will be configured with a majority read/write concern, 5 sec. write concern timeout and journal write acknowledgement.
 func NewMongoStore(uri string, cnf *Config, opts ...*options.ClientOptions) (*MongoStore, error) {
 	if len(opts) == 0 {
 		opts = defaultMongoDBConf()
