@@ -65,15 +65,15 @@ var _ = Describe("account", func() {
 
 	var acc account.Account
 	var em event.EventMachine
-	var poll *poller.TransferPoller
+	var transferPoller *poller.TransferPoller
 	var st *inmemory.InMemoryStore
 
 	newAccount := func() {
 		st = inmemory.NewInMemoryStore()
 		em = event.NewEventMachine()
-		poll = poller.NewTransferPoller(
+		transferPoller = poller.NewTransferPoller(
 			api, st, em,
-			account.NewInMemorySeedProvider(seed), poller.NewPerTailReceiveEventFilter(), time.Duration(60)*time.Second)
+			account.NewInMemorySeedProvider(seed), poller.NewPerTailReceiveEventFilter(), 0)
 		acc, err = builder.NewBuilder().
 			WithAPI(api).
 			WithStore(st).
@@ -82,7 +82,7 @@ var _ = Describe("account", func() {
 			WithSecurityLevel(usedSecLvl).
 			WithTimeSource(&fakeclock{}).
 			WithEvents(em).
-			WithPlugins(poll).
+			WithPlugins(transferPoller).
 			WithSeed(seed).
 			Build()
 		if err != nil {
@@ -317,7 +317,7 @@ var _ = Describe("account", func() {
 				eventListener := listener.NewEventListener(em).Sends()
 				resultBackCheck := make(chan bundle.Bundle)
 
-				poll.ManualPoll()
+				transferPoller.Poll()
 
 				go func() {
 					bndl := <-eventListener.Sending
@@ -356,7 +356,7 @@ var _ = Describe("account", func() {
 				eventListener.ConfirmedSends()
 
 				go func() {
-					poll.ManualPoll()
+					transferPoller.Poll()
 				}()
 
 				bundleFromEvent = <-eventListener.Sent

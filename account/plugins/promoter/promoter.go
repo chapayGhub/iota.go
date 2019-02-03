@@ -5,6 +5,7 @@ import (
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
 	"github.com/iotaledger/iota.go/account/timesrc"
+	"github.com/iotaledger/iota.go/account/util"
 	"github.com/iotaledger/iota.go/api"
 	"github.com/iotaledger/iota.go/bundle"
 	"github.com/iotaledger/iota.go/transaction"
@@ -37,7 +38,8 @@ type PromotionReattachmentEvent struct {
 	ReattachmentTailTxHash Hash `json:"reattachment_tail_tx_hash"`
 }
 
-// NewPromoter creates a new Promoter.
+// NewPromoter creates a new Promoter. If the interval is set to 0, the Promoter will only
+// promote/reattach through PromoteReattach().
 func NewPromoter(
 	api *api.API, store store.Store, eventMachine event.EventMachine, timesource timesrc.TimeSource,
 	interval time.Duration, depth uint64, mwm uint64,
@@ -45,16 +47,20 @@ func NewPromoter(
 	if eventMachine == nil {
 		eventMachine = &event.DiscardEventMachine{}
 	}
-	return &Promoter{
+	promoter := &Promoter{
 		interval: interval, em: eventMachine, timeSource: timesource,
 		api: api, store: store, depth: depth, mwm: mwm,
 		tailCache: make(map[string]*transaction.Transaction),
-		syncer:    make(chan struct{}), shutdown: make(chan struct{}),
 	}
+	promoter.syncTimer = util.NewSyncIntervalTimer(interval, promoter.promote, func(err error) {
+		promoter.em.Emit(err, event.EventError)
+	})
+	return promoter
 }
 
 // Promoter is an account plugin which takes care of trying to get pending transfers
 // to get confirmed by issuing promotion transactions and creating reattachments.
+// The Promoter will only run one promotion/reattachment task at any given time.
 type Promoter struct {
 	interval   time.Duration
 	api        *api.API
@@ -65,8 +71,7 @@ type Promoter struct {
 	mwm        uint64
 	acc        account.Account
 	tailCache  map[string]*transaction.Transaction
-	syncer     chan struct{}
-	shutdown   chan struct{}
+	syncTimer  *util.SyncIntervalTimer
 }
 
 func (p *Promoter) Name() string {
@@ -75,50 +80,23 @@ func (p *Promoter) Name() string {
 
 func (p *Promoter) Start(acc account.Account) error {
 	p.acc = acc
-	go func() {
-	exit:
-		for {
-			select {
-			case <-time.After(p.interval):
-				p.promote()
-				select {
-				case <-p.shutdown:
-					break exit
-				default:
-				}
-				// check for pause signal
-			case p.syncer <- struct{}{}:
-				// await resume signal
-				<-p.syncer
-			case <-p.shutdown:
-				break exit
-			}
-		}
-		close(p.syncer)
-	}()
+	go p.syncTimer.Start()
 	return nil
-}
-
-// ManualPoll awaits the current promotion/reattachment task to finish (in case it's ongoing),
-// pauses the task, does a manual promotion/reattachment task, resumes the repeated task and then returns.
-func (p *Promoter) ManualPoll() error {
-	p.pause()
-	defer p.resume()
-	p.promote()
-	return nil
-}
-
-func (p *Promoter) pause() {
-	<-p.syncer
-}
-
-func (p *Promoter) resume() {
-	p.syncer <- struct{}{}
 }
 
 func (p *Promoter) Shutdown() error {
-	p.shutdown <- struct{}{}
+	p.syncTimer.Stop()
 	return nil
+}
+
+// PromoteReattach awaits the current promotion/reattachment task to finish (in case it's ongoing),
+// pauses the task, executes a manual task, resumes the repeated task and then returns.
+// PromoteReattach will block infinitely if called after the account has been shutdown.
+func (p *Promoter) PromoteReattach() error {
+	p.syncTimer.Pause()
+	err := p.promote()
+	p.syncTimer.Resume()
+	return err
 }
 
 const approxAboveMaxDepthMinutes = 5
@@ -137,13 +115,13 @@ const referenceTooOldMsg = "reference transaction is too old"
 var emptySeed = strings.Repeat("9", 81)
 var ErrUnpromotableTail = errors.New("tail is unpromoteable")
 
-func (p *Promoter) promote() {
+func (p *Promoter) promote() error {
 	pendingTransfers, err := p.store.GetPendingTransfers(p.acc.ID())
 	if err != nil {
-		return
+		return err
 	}
 	if len(pendingTransfers) == 0 {
-		return
+		return nil
 	}
 
 	send := func(preparedBundle []Trytes, tips *api.TransactionsToApprove) (Hash, error) {
@@ -201,16 +179,15 @@ func (p *Promoter) promote() {
 		return send(essenceTrytes, tips)
 	}
 
-	storeTailTxHash := func(key string, tailTxHash string, msg string) bool {
+	storeTailTxHash := func(key string, tailTxHash string, msg string) error {
 		if err := p.store.AddTailHash(p.acc.ID(), key, tailTxHash); err != nil {
 			if err == store.ErrPendingTransferNotFound {
 				// might have been removed by polling goroutine
-				return true
+				return nil
 			}
-			p.em.Emit(errors.Wrap(err, msg), event.EventError)
-			return false
+			return errors.Wrap(err, msg)
 		}
-		return true
+		return nil
 	}
 
 	tailsSet := map[string]struct{}{}
@@ -265,13 +242,12 @@ func (p *Promoter) promote() {
 		if len(tailToPromote) > 0 {
 			promoteTailTxHash, err := promote(tailToPromote)
 			if err != nil {
-				p.em.Emit(errors.Wrap(ErrUnableToPromote, err.Error()), event.EventError)
-				continue
+				return errors.Wrap(ErrUnableToPromote, err.Error())
 			}
 			// only load bundle once promotion was successful
 			bndl, err := store.PendingTransferToBundle(pendingTransfer)
 			if err != nil {
-				continue
+				return errors.Wrapf(err, "unable to translate pending transfer to bundle for reattachment")
 			}
 			p.em.Emit(PromotionReattachmentEvent{
 				BundleHash:          bndl[0].Bundle,
@@ -284,27 +260,27 @@ func (p *Promoter) promote() {
 		// load bundle as we need to reattach
 		bndl, err := store.PendingTransferToBundle(pendingTransfer)
 		if err != nil {
-			continue
+			return errors.Wrapf(err, "unable to translate pending transfer to bundle for reattachment")
 		}
 
 		// reattach
 		reattachTailTxHash, err := reattach(bndl)
 		if err != nil {
-			p.em.Emit(errors.Wrap(ErrUnableToReattach, err.Error()), event.EventError)
-			continue
+			return errors.Wrap(ErrUnableToReattach, err.Error())
 		}
 		p.em.Emit(PromotionReattachmentEvent{
 			BundleHash:             bndl[0].Bundle,
 			OriginTailTxHash:       key,
 			ReattachmentTailTxHash: reattachTailTxHash,
 		}, EventReattachment)
-		if !storeTailTxHash(key, reattachTailTxHash, "unable to store reattachment tx tail hash") {
-			continue
+
+		if err := storeTailTxHash(key, reattachTailTxHash, "unable to store reattachment tx tail hash"); err != nil {
+			return err
 		}
+
 		promoteTailTxHash, err := promote(reattachTailTxHash)
 		if err != nil {
-			p.em.Emit(errors.Wrap(ErrUnableToPromote, err.Error()), event.EventError)
-			continue
+			return errors.Wrap(ErrUnableToPromote, err.Error())
 		}
 		p.em.Emit(PromotionReattachmentEvent{
 			BundleHash:          bndl[0].Bundle,
@@ -319,4 +295,5 @@ func (p *Promoter) promote() {
 			delete(p.tailCache, cachedTailTx)
 		}
 	}
+	return nil
 }
