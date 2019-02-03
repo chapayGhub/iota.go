@@ -397,7 +397,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 
 	bndl, err := transaction.AsTransactionObjects(bndlTrytes, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "can't convert bundle trytes to txs in send op.")
 	}
 
 	acc.setts.EventMachine.Emit(bndl, event.EventSendingTransfer)

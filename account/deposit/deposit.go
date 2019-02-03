@@ -56,6 +56,7 @@ func ParseMagnetLink(s string) (*Conditions, error) {
 	if len(link.Host) != consts.AddressWithChecksumTrytesSize {
 		return nil, errors.Wrap(ErrAddressInvalid, "address must be 90 trytes long")
 	}
+	cond.Address = link.Host
 	expiresSeconds, err := strconv.ParseInt(query.Get(MagnetLinkTimeoutField), 10, 64)
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid expire timestamp")
