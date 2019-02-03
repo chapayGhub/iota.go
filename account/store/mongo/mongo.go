@@ -7,34 +7,42 @@ import (
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo"
 	"github.com/mongodb/mongo-go-driver/mongo/options"
+	"github.com/mongodb/mongo-go-driver/mongo/readconcern"
+	"github.com/mongodb/mongo-go-driver/mongo/writeconcern"
 	"strconv"
 	"time"
 )
 
+// ContextProviderFunc which generates a new context.
 type ContextProviderFunc func() context.Context
 
+// Config defines settings which are used in conjunction with MongoDB.
 type Config struct {
-	DBName          string
-	CollName        string
+	// The name of the database inside MongoDB.
+	DBName string
+	// The name of the collection in which to store accounts.
+	CollName string
+	// The context provider which gets called up on each MongoDB call
+	// in order to determine the timeout/cancellation.
 	ContextProvider ContextProviderFunc
 }
 
-const defaultDBName = "iota_account"
-const defaultCollName = "accounts"
+const DefaultDBName = "iota_account"
+const DefaultCollName = "accounts"
 
 func defaultConfig(cnf *Config) *Config {
 	if cnf == nil {
 		return &Config{
-			DBName:          defaultDBName,
-			CollName:        defaultCollName,
+			DBName:          DefaultDBName,
+			CollName:        DefaultCollName,
 			ContextProvider: defaultCtxProvider,
 		}
 	}
 	if cnf.DBName == "" {
-		cnf.DBName = defaultDBName
+		cnf.DBName = DefaultDBName
 	}
 	if cnf.CollName == "" {
-		cnf.CollName = defaultCollName
+		cnf.CollName = DefaultCollName
 	}
 	if cnf.ContextProvider == nil {
 		cnf.ContextProvider = defaultCtxProvider
@@ -42,12 +50,26 @@ func defaultConfig(cnf *Config) *Config {
 	return cnf
 }
 
+func defaultMongoDBConf() []*options.ClientOptions {
+	return []*options.ClientOptions{
+		{
+			WriteConcern: writeconcern.New(writeconcern.J(true), writeconcern.WMajority()),
+			ReadConcern:  readconcern.Majority(),
+		},
+	}
+}
+
 func defaultCtxProvider() context.Context {
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 	return ctx
 }
 
+// NewMongoStore creates a new MongoDB store. If no MongoDB client options are defined,
+// the client will be configured with a majority read/write concern, journal write acknowledgement.
 func NewMongoStore(uri string, cnf *Config, opts ...*options.ClientOptions) (*MongoStore, error) {
+	if len(opts) == 0 {
+		opts = defaultMongoDBConf()
+	}
 	client, err := mongo.NewClientWithOptions(uri, opts...)
 	if err != nil {
 		return nil, err

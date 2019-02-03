@@ -44,8 +44,8 @@ type PendingTransfer struct {
 // It differs from the normal request only in having an additional field to hold the security level
 // used to generate the deposit address.
 type StoredDepositRequest struct {
-	deposit.Request
-	SecurityLevel consts.SecurityLevel `json:"security_level" bson:"security_level"`
+	deposit.Request `bson:"inline"`
+	SecurityLevel   consts.SecurityLevel `json:"security_level" bson:"security_level"`
 }
 
 // errors produced by the store package.

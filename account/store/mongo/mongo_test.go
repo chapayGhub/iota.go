@@ -1,16 +1,23 @@
 package mongo_test
 
 import (
+	"context"
+	"github.com/iotaledger/iota.go/account/deposit"
 	"github.com/iotaledger/iota.go/account/store"
 	mongo_store "github.com/iotaledger/iota.go/account/store/mongo"
+	"github.com/iotaledger/iota.go/consts"
 	"github.com/iotaledger/iota.go/transaction"
 	"github.com/iotaledger/iota.go/trinary"
+	"github.com/mongodb/mongo-go-driver/mongo"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"strings"
+	"time"
 )
 
 const id = "d7e75aa9def2ef9c813313f0e0fb72b9"
+const mongoDBURI = "mongodb://localhost:27017"
+const dbName = "iota_accounts_test"
 
 var _ = Describe("Mongo", func() {
 
@@ -22,7 +29,20 @@ var _ = Describe("Mongo", func() {
 		panic(err)
 	}
 
-	st, err := mongo_store.NewMongoStore("mongodb://localhost:27017", nil)
+	ctx, _ := context.WithTimeout(context.Background(), time.Duration(5)*time.Second)
+	client, err := mongo.NewClient(mongoDBURI)
+	if err != nil {
+		panic(err)
+	}
+	if err := client.Connect(ctx); err != nil {
+		panic(err)
+	}
+
+	if err := client.Database(dbName).Drop(ctx); err != nil {
+		panic(err)
+	}
+
+	st, err := mongo_store.NewMongoStore(mongoDBURI, &mongo_store.Config{DBName: dbName})
 	if err != nil {
 		panic(err)
 	}
@@ -33,6 +53,30 @@ var _ = Describe("Mongo", func() {
 		state, err = st.LoadAccount(id)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(state.IsNew()).To(BeTrue())
+	})
+
+	Context("AddDepositRequest()", func() {
+		It("adds the deposit request to the store", func() {
+			ts := time.Now().AddDate(0, 0, 1)
+			var expAm uint64 = 1337
+			err := st.AddDepositRequest(id, 0, &store.StoredDepositRequest{
+				SecurityLevel: consts.SecurityLevelMedium,
+				Request: deposit.Request{
+					TimeoutAt:      &ts,
+					MultiUse:       true,
+					ExpectedAmount: &expAm,
+				},
+			})
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("GetDepositRequests()", func() {
+		It("returns all deposit requests", func() {
+			reqs, err := st.GetDepositRequests(id)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(*reqs[0].ExpectedAmount).To(Equal(uint64(1337)))
+		})
 	})
 
 	Context("AddPendingTransfer()", func() {
