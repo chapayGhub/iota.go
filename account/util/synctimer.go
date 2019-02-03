@@ -1,6 +1,8 @@
 package util
 
-import "time"
+import (
+	"time"
+)
 
 // SyncFunc is a function which is called in a synchronized manner.
 type SyncFunc func() error
@@ -10,15 +12,15 @@ type OnErrorFunc func(err error)
 
 // NewSyncIntervalTimer creates a new SyncIntervalTimer with the given function and interval. onError can be nil.
 func NewSyncIntervalTimer(interval time.Duration, f SyncFunc, onError OnErrorFunc) *SyncIntervalTimer {
-	var intervalTimer *time.Timer
+	var intervalTimer *time.Ticker
 	if interval > 0 {
-		intervalTimer = time.NewTimer(interval)
+		intervalTimer = time.NewTicker(interval)
 	}
 	return &SyncIntervalTimer{
 		f: f, onError: onError,
 		intervalTimer: intervalTimer,
 		sync:          make(chan struct{}),
-		shutdown:      make(chan struct{}),
+		stop:          make(chan struct{}),
 	}
 }
 
@@ -26,9 +28,9 @@ func NewSyncIntervalTimer(interval time.Duration, f SyncFunc, onError OnErrorFun
 type SyncIntervalTimer struct {
 	f             SyncFunc
 	onError       OnErrorFunc
-	intervalTimer *time.Timer
+	intervalTimer *time.Ticker
 	sync          chan struct{}
-	shutdown      chan struct{}
+	stop          chan struct{}
 }
 
 // Start starts the timer loop. This function blocks the caller until
@@ -40,7 +42,7 @@ func (sit *SyncIntervalTimer) Start() {
 			select {
 			case sit.sync <- struct{}{}:
 				<-sit.sync
-			case <-sit.shutdown:
+			case <-sit.stop:
 				break exitA
 			}
 		}
@@ -55,13 +57,13 @@ func (sit *SyncIntervalTimer) Start() {
 					}
 				}
 				select {
-				case <-sit.shutdown:
+				case <-sit.stop:
 					break exitB
 				default:
 				}
 			case sit.sync <- struct{}{}:
 				<-sit.sync
-			case <-sit.shutdown:
+			case <-sit.stop:
 				break exitB
 			}
 		}
@@ -81,8 +83,8 @@ func (sit *SyncIntervalTimer) Resume() {
 
 // Stop awaits the currently executing function to return and then stops the interval loop.
 func (sit *SyncIntervalTimer) Stop() {
-	sit.shutdown <- struct{}{}
-	if sit.intervalTimer != nil && !sit.intervalTimer.Stop() {
-		<-sit.intervalTimer.C
+	sit.stop <- struct{}{}
+	if sit.intervalTimer != nil {
+		sit.intervalTimer.Stop()
 	}
 }
