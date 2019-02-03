@@ -48,7 +48,8 @@ func NewPromoter(
 	return &Promoter{
 		interval: interval, em: eventMachine, timeSource: timesource,
 		api: api, store: store, depth: depth, mwm: mwm,
-		syncer: make(chan struct{}), shutdown: make(chan struct{}),
+		tailCache: make(map[string]*transaction.Transaction),
+		syncer:    make(chan struct{}), shutdown: make(chan struct{}),
 	}
 }
 
@@ -63,6 +64,7 @@ type Promoter struct {
 	depth      uint64
 	mwm        uint64
 	acc        account.Account
+	tailCache  map[string]*transaction.Transaction
 	syncer     chan struct{}
 	shutdown   chan struct{}
 }
@@ -201,8 +203,8 @@ func (p *Promoter) promote() {
 
 	storeTailTxHash := func(key string, tailTxHash string, msg string) bool {
 		if err := p.store.AddTailHash(p.acc.ID(), key, tailTxHash); err != nil {
-			// might have been removed by polling goroutine
 			if err == store.ErrPendingTransferNotFound {
+				// might have been removed by polling goroutine
 				return true
 			}
 			p.em.Emit(errors.Wrap(err, msg), event.EventError)
@@ -211,29 +213,45 @@ func (p *Promoter) promote() {
 		return true
 	}
 
+	tailsSet := map[string]struct{}{}
 	for key, pendingTransfer := range pendingTransfers {
-		// search for tail transaction which is consistent and above max depth
+		// search for a tail transaction which is consistent and above max depth
 		var tailToPromote string
-		// go in reverse order to start from the most recent tails
+		// go in reverse order to start from the most recent tails.
+		// we iterate over all tails even if a promotable tail was found in between
+		// in order to build the set of tail tx hashes, which is later used
+		// to clean up the cache from confirmed transactions.
 		for i := len(pendingTransfer.Tails) - 1; i >= 0; i-- {
 			tailTx := pendingTransfer.Tails[i]
-			consistent, _, err := p.api.CheckConsistency(tailTx)
-			if err != nil {
+
+			// add tail to set for cleanup of cache
+			tailsSet[tailTx] = struct{}{}
+
+			if tailToPromote != "" {
 				continue
 			}
 
-			if !consistent {
-				continue
-			}
+			tx, isCached := p.tailCache[tailTx]
+			if !isCached {
+				consistent, _, err := p.api.CheckConsistency(tailTx)
+				if err != nil {
+					continue
+				}
 
-			txTrytes, err := p.api.GetTrytes(tailTx)
-			if err != nil {
-				continue
-			}
+				if !consistent {
+					continue
+				}
 
-			tx, err := transaction.AsTransactionObject(txTrytes[0])
-			if err != nil {
-				continue
+				txTrytes, err := p.api.GetTrytes(tailTx)
+				if err != nil {
+					continue
+				}
+
+				tx, err = transaction.AsTransactionObject(txTrytes[0])
+				if err != nil {
+					continue
+				}
+				p.tailCache[tailTx] = tx
 			}
 
 			if above, err := aboveMaxDepth(p.timeSource, time.Unix(int64(tx.Timestamp), 0)); !above || err != nil {
@@ -241,12 +259,6 @@ func (p *Promoter) promote() {
 			}
 
 			tailToPromote = tailTx
-			break
-		}
-
-		bndl, err := store.PendingTransferToBundle(pendingTransfer)
-		if err != nil {
-			continue
 		}
 
 		// promote as tail was found
@@ -256,11 +268,22 @@ func (p *Promoter) promote() {
 				p.em.Emit(errors.Wrap(ErrUnableToPromote, err.Error()), event.EventError)
 				continue
 			}
+			// only load bundle once promotion was successful
+			bndl, err := store.PendingTransferToBundle(pendingTransfer)
+			if err != nil {
+				continue
+			}
 			p.em.Emit(PromotionReattachmentEvent{
 				BundleHash:          bndl[0].Bundle,
 				PromotionTailTxHash: promoteTailTxHash,
 				OriginTailTxHash:    key,
 			}, EventPromotion)
+			continue
+		}
+
+		// load bundle as we need to reattach
+		bndl, err := store.PendingTransferToBundle(pendingTransfer)
+		if err != nil {
 			continue
 		}
 
@@ -288,5 +311,12 @@ func (p *Promoter) promote() {
 			OriginTailTxHash:    key,
 			PromotionTailTxHash: promoteTailTxHash,
 		}, EventPromotion)
+	}
+
+	// clear cache
+	for cachedTailTx := range p.tailCache {
+		if _, has := tailsSet[cachedTailTx]; !has {
+			delete(p.tailCache, cachedTailTx)
+		}
 	}
 }
