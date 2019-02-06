@@ -81,7 +81,7 @@ const (
 	// emitted when transactions to approve are fetched.
 	EventGettingTransactionsToApprove
 	// emitted when Proof-of-Work is being done.
-	EventDoingProofOfWork
+	EventAttachingToTangle
 	// emitted for internal errors of all kinds.
 	EventError
 	// emitted when the account got shutdown cleanly.

@@ -26,7 +26,7 @@ type ChannelEventListener struct {
 	ExecutingInputSelection      chan bool
 	PreparingTransfers           chan struct{}
 	GettingTransactionsToApprove chan struct{}
-	ExecutingProofOfWork         chan struct{}
+	AttachingToTangle            chan struct{}
 	Shutdown                     chan struct{}
 }
 
@@ -147,12 +147,12 @@ func (el *ChannelEventListener) RegGettingTransactionsToApprove() *ChannelEventL
 	return el
 }
 
-// RegProofOfWork registers this listener to listen to when Proof-of-Work is executed.
-func (el *ChannelEventListener) RegProofOfWork() *ChannelEventListener {
-	el.ExecutingProofOfWork = make(chan struct{})
+// RegAttachingToTangle registers this listener to listen to when Proof-of-Work is executed.
+func (el *ChannelEventListener) RegAttachingToTangle() *ChannelEventListener {
+	el.AttachingToTangle = make(chan struct{})
 	el.ids = append(el.ids, el.em.RegisterListener(func(data interface{}) {
-		el.ExecutingProofOfWork <- struct{}{}
-	}, event.EventDoingProofOfWork))
+		el.AttachingToTangle <- struct{}{}
+	}, event.EventAttachingToTangle))
 	return el
 }
 
@@ -179,6 +179,6 @@ func (el *ChannelEventListener) All() *ChannelEventListener {
 		RegInputSelection().
 		RegPreparingTransfer().
 		RegGettingTransactionsToApprove().
-		RegProofOfWork().
+		RegAttachingToTangle().
 		RegInternalErrors()
 }

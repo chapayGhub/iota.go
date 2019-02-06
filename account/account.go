@@ -389,7 +389,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		return nil, errors.Wrap(err, "unable to GTTA in send op.")
 	}
 
-	acc.setts.EventMachine.Emit(nil, event.EventDoingProofOfWork)
+	acc.setts.EventMachine.Emit(nil, event.EventAttachingToTangle)
 	powedTrytes, err := acc.setts.API.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, acc.setts.MWM, bundleTrytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "performing PoW in send op. failed")

@@ -116,11 +116,11 @@ func (el *CallbackEventListener) RegGettingTransactionsToApprove(f SignalEventCa
 	}, event.EventGettingTransactionsToApprove))
 }
 
-// RegProofOfWork registers this listener to listen to when Proof-of-Work is executed.
-func (el *CallbackEventListener) RegProofOfWork(f SignalEventCallback) {
+// RegAttachingToTangle registers this listener to listen to when Proof-of-Work is executed.
+func (el *CallbackEventListener) RegAttachingToTangle(f SignalEventCallback) {
 	el.ids = append(el.ids, el.em.RegisterListener(func(data interface{}) {
 		f()
-	}, event.EventDoingProofOfWork))
+	}, event.EventAttachingToTangle))
 }
 
 // RegInternalErrors registers this listener to listen for internal account errors.
