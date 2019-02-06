@@ -1,8 +1,6 @@
 package account
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"github.com/iotaledger/iota.go/account/deposit"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
@@ -12,6 +10,7 @@ import (
 	"github.com/iotaledger/iota.go/consts"
 	"github.com/iotaledger/iota.go/guards"
 	"github.com/iotaledger/iota.go/guards/validators"
+	"github.com/iotaledger/iota.go/kerl"
 	"github.com/iotaledger/iota.go/transaction"
 	. "github.com/iotaledger/iota.go/trinary"
 	"github.com/pkg/errors"
@@ -81,10 +80,24 @@ func NewAccount(setts *Settings) (Account, error) {
 	if setts == nil {
 		setts = DefaultSettings()
 	}
-	return &account{
-		id:    fmt.Sprintf("%x", sha256.Sum256([]byte(seed))),
-		setts: setts,
-	}, nil
+	id, err := generateID(seed)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to generate account id")
+	}
+	return &account{id: id, setts: setts}, nil
+}
+
+func generateID(seed Trytes) (string, error) {
+	addr, _ := address.GenerateAddress(seed, 0, consts.SecurityLevelMedium)
+	k := kerl.NewKerl()
+	if err := k.Absorb(MustTrytesToTrits(addr)); err != nil {
+		return "", err
+	}
+	hashTrits, err := k.Squeeze(consts.HashTrinarySize)
+	if err != nil {
+		return "", err
+	}
+	return MustTritsToTrytes(hashTrits), nil
 }
 
 type account struct {
@@ -364,16 +377,19 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		Timestamp:        &ts,
 	}
 
+	acc.setts.EventMachine.Emit(nil, event.EventPreparingTransfer)
 	bundleTrytes, err := acc.setts.API.PrepareTransfers(seed, transfers, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to prepare transfers in send op.")
 	}
 
+	acc.setts.EventMachine.Emit(nil, event.EventGettingTransactionsToApprove)
 	tips, err := acc.setts.API.GetTransactionsToApprove(acc.setts.Depth)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to GTTA in send op.")
 	}
 
+	acc.setts.EventMachine.Emit(nil, event.EventDoingProofOfWork)
 	powedTrytes, err := acc.setts.API.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, acc.setts.MWM, bundleTrytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "performing PoW in send op. failed")
@@ -400,7 +416,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		return nil, errors.Wrap(err, "can't convert bundle trytes to txs in send op.")
 	}
 
-	acc.setts.EventMachine.Emit(bndl, event.EventSendingTransfer)
+	acc.setts.EventMachine.Emit(bndl, event.EventSentTransfer)
 	return bndl, nil
 }
 
@@ -453,6 +469,7 @@ func (acc *account) totalBalance() (uint64, error) {
 
 // selects fulfilled and timed out deposit addresses as inputs.
 func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool) (uint64, []api.Input, []uint64, error) {
+	acc.setts.EventMachine.Emit(balanceCheck, event.EventDoingInputSelection)
 	depositRequests, err := acc.setts.Store.GetDepositRequests(acc.id)
 	if err != nil {
 		return 0, nil, nil, errors.Wrap(err, "unable to load account state for input selection")

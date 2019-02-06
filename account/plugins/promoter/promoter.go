@@ -249,7 +249,7 @@ func (p *Promoter) promote() error {
 			if err != nil {
 				return errors.Wrapf(err, "unable to translate pending transfer to bundle for reattachment")
 			}
-			p.em.Emit(PromotionReattachmentEvent{
+			p.em.Emit(&PromotionReattachmentEvent{
 				BundleHash:          bndl[0].Bundle,
 				PromotionTailTxHash: promoteTailTxHash,
 				OriginTailTxHash:    key,
@@ -268,7 +268,7 @@ func (p *Promoter) promote() error {
 		if err != nil {
 			return errors.Wrap(ErrUnableToReattach, err.Error())
 		}
-		p.em.Emit(PromotionReattachmentEvent{
+		p.em.Emit(&PromotionReattachmentEvent{
 			BundleHash:             bndl[0].Bundle,
 			OriginTailTxHash:       key,
 			ReattachmentTailTxHash: reattachTailTxHash,
@@ -282,7 +282,7 @@ func (p *Promoter) promote() error {
 		if err != nil {
 			return errors.Wrap(ErrUnableToPromote, err.Error())
 		}
-		p.em.Emit(PromotionReattachmentEvent{
+		p.em.Emit(&PromotionReattachmentEvent{
 			BundleHash:          bndl[0].Bundle,
 			OriginTailTxHash:    key,
 			PromotionTailTxHash: promoteTailTxHash,

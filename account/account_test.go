@@ -314,13 +314,13 @@ var _ = Describe("account", func() {
 				Expect(balance).To(Equal(uint64(100)))
 
 				By("registering an event listener for sending transfers")
-				eventListener := listener.NewEventListener(em).Sends()
+				eventListener := listener.NewChannelEventListener(em).RegSentTransfers()
 				resultBackCheck := make(chan bundle.Bundle)
 
 				transferPoller.Poll()
 
 				go func() {
-					bndl := <-eventListener.Sending
+					bndl := <-eventListener.SentTransfer
 					resultBackCheck <- bndl
 				}()
 
@@ -353,13 +353,13 @@ var _ = Describe("account", func() {
 				}
 
 				By("registering an event listener for confirmed sent transfers")
-				eventListener.ConfirmedSends()
+				eventListener.RegConfirmedTransfers()
 
 				go func() {
 					transferPoller.Poll()
 				}()
 
-				bundleFromEvent = <-eventListener.Sent
+				bundleFromEvent = <-eventListener.TransferConfirmed
 				Expect(bundleFromEvent[0].Bundle).To(Equal(finalTxs[0].Bundle))
 
 				state, err := st.LoadAccount(id)
