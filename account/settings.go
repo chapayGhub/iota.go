@@ -1,12 +1,13 @@
 package account
 
 import (
-	"github.com/iotaledger/iota.go/account/timesrc"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
 	"github.com/iotaledger/iota.go/account/store/inmemory"
+	"github.com/iotaledger/iota.go/account/timesrc"
 	"github.com/iotaledger/iota.go/api"
 	"github.com/iotaledger/iota.go/consts"
+	"strings"
 )
 
 // InputSelectionFunc defines a function which given the account, transfer value and the flag balance check,
@@ -29,6 +30,8 @@ type Settings struct {
 	Plugins             map[string]Plugin
 }
 
+var emptySeed = strings.Repeat("9", 81)
+
 // DefaultSettings returns Settings initialized with default values:
 // empty seed (81x "9" trytes), mwm: 14, depth: 3, security level: 2, no event machine,
 // system timesrc, default input sel. strat, in-memory store, iota-api pointing to localhost,
@@ -39,6 +42,7 @@ func DefaultSettings(setts ...Settings) *Settings {
 		return &Settings{
 			MWM:                 14,
 			Depth:               3,
+			SeedProv:            NewInMemorySeedProvider(emptySeed),
 			SecurityLevel:       consts.SecurityLevelMedium,
 			TimeSource:          &timesrc.SystemClock{},
 			EventMachine:        &event.DiscardEventMachine{},
