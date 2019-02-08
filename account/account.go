@@ -4,7 +4,6 @@ import (
 	"github.com/iotaledger/iota.go/account/deposit"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
-	"github.com/iotaledger/iota.go/address"
 	"github.com/iotaledger/iota.go/api"
 	"github.com/iotaledger/iota.go/bundle"
 	"github.com/iotaledger/iota.go/consts"
@@ -70,25 +69,47 @@ func (recps Recipients) AsTransfers() bundle.Transfers {
 // NewAccount creates a new account. If settings are nil, the account is
 // initialized with the default settings provided by DefaultSettings().
 func NewAccount(setts *Settings) (Account, error) {
-	seed, err := setts.SeedProv.Seed()
-	if err != nil {
-		return nil, err
-	}
-	if err := validators.Validate(validators.ValidateSeed(seed)); err != nil {
-		return nil, err
-	}
 	if setts == nil {
 		setts = DefaultSettings()
 	}
-	id, err := generateID(seed)
+	if err := initFuncs(setts); err != nil {
+		return nil, err
+	}
+	id, err := generateID(setts.AddrGen)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to generate account id")
 	}
 	return &account{id: id, setts: setts}, nil
 }
 
-func generateID(seed Trytes) (string, error) {
-	addr, _ := address.GenerateAddress(seed, 0, consts.SecurityLevelMedium)
+func initFuncs(setts *Settings) error {
+	if setts.SeedProv != nil {
+		seed, err := setts.SeedProv.Seed()
+		if err != nil {
+			return err
+		}
+		if err := validators.Validate(validators.ValidateSeed(seed)); err != nil {
+			return err
+		}
+		if setts.AddrGen == nil {
+			setts.AddrGen = DefaultAddrGen(setts.SeedProv)
+		}
+		if setts.PrepareTransfers == nil {
+			setts.PrepareTransfers = DefaultPrepareTransfers(setts.API, setts.SeedProv)
+		}
+		return nil
+	}
+	if setts.AddrGen == nil {
+		return errors.Wrap(ErrInvalidAccountSettings, "if no SeedProvider is defined, then the AddrGen setting must be set")
+	}
+	if setts.PrepareTransfers == nil {
+		return errors.Wrap(ErrInvalidAccountSettings, "if no SeedProvider is defined, then the PrepareTransfers setting must be set")
+	}
+	return nil
+}
+
+func generateID(addrGen AddrGenFunc) (string, error) {
+	addr, _ := addrGen(0, consts.SecurityLevelMedium, false)
 	k := kerl.NewKerl()
 	if err := k.Absorb(MustTrytesToTrits(addr)); err != nil {
 		return "", err
@@ -271,13 +292,8 @@ func (acc *account) shutdownPlugins() error {
 }
 
 func (acc *account) allocateDepositRequest(req *deposit.Request) (*deposit.Conditions, error) {
-	seed, err := acc.setts.SeedProv.Seed()
-	if err != nil {
-		return nil, err
-	}
-
 	acc.lastKeyIndex++
-	addr, err := address.GenerateAddress(seed, acc.lastKeyIndex, acc.setts.SecurityLevel, true)
+	addr, err := acc.setts.AddrGen(acc.lastKeyIndex, acc.setts.SecurityLevel, true)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to generate address in address gen. function")
 	}
@@ -301,11 +317,6 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 	forRemoval := []uint64{}
 	var success bool
 
-	seed, err := acc.setts.SeedProv.Seed()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to get seed from seed provider in send op.")
-	}
-
 	transfers := targets.AsTransfers()
 	currentTime, err := acc.setts.TimeSource.Time()
 	if err != nil {
@@ -327,7 +338,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 		croppedRemainderAddr := (*remainderAddress)[:81]
 		var remainderAddrKeyIndex *uint64
 		for keyIndex, req := range reqs {
-			addr, err := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+			addr, err := acc.setts.AddrGen(keyIndex, req.SecurityLevel, false)
 			if err != nil {
 				continue
 			}
@@ -378,7 +389,7 @@ func (acc *account) send(targets Recipients) (bundle.Bundle, error) {
 	}
 
 	acc.setts.EventMachine.Emit(nil, event.EventPreparingTransfer)
-	bundleTrytes, err := acc.setts.API.PrepareTransfers(seed, transfers, opts)
+	bundleTrytes, err := acc.setts.PrepareTransfers(transfers, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to prepare transfers in send op.")
 	}
@@ -442,15 +453,10 @@ func (acc *account) totalBalance() (uint64, error) {
 	}
 	subtangleHash := solidSubtangleMilestone.LatestSolidSubtangleMilestone
 
-	seed, err := acc.setts.SeedProv.Seed()
-	if err != nil {
-		return 0, errors.Wrap(err, "unable to get seed from seed provider for computing total balance")
-	}
-
 	addrs := make(Hashes, len(state.DepositRequests))
 	var i int
 	for keyIndex, req := range state.DepositRequests {
-		addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
+		addr, _ := acc.setts.AddrGen(keyIndex, req.SecurityLevel, true)
 		addrs[i] = addr
 		i++
 	}
@@ -523,11 +529,6 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 		toRemove = append(toRemove, keyIndex)
 	}
 
-	seed, err := acc.setts.SeedProv.Seed()
-	if err != nil {
-		return 0, nil, nil, errors.Wrap(err, "unable to get seed from seed provider for doing input selection")
-	}
-
 	// iterate over all allocated deposit addresses
 	for keyIndex, req := range depositRequests {
 		// remainder address
@@ -535,7 +536,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 			if req.ExpectedAmount == nil {
 				panic("remainder address in system without 'expected amount'")
 			}
-			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
+			addr, _ := acc.setts.AddrGen(keyIndex, req.SecurityLevel, true)
 			primaryAddrs = append(primaryAddrs, addr)
 			primarySelection = append(primarySelection, selection{keyIndex, req})
 			continue
@@ -543,7 +544,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 		// timed out
 		if now.After(*req.TimeoutAt) {
-			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
+			addr, _ := acc.setts.AddrGen(keyIndex, req.SecurityLevel, true)
 			secondaryAddrs = append(secondaryAddrs, addr)
 			secondarySelection = append(secondarySelection, selection{keyIndex, req})
 			continue
@@ -556,14 +557,14 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 			if req.ExpectedAmount == nil {
 				continue
 			}
-			addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
+			addr, _ := acc.setts.AddrGen(keyIndex, req.SecurityLevel, true)
 			primaryAddrs = append(primaryAddrs, addr)
 			primarySelection = append(primarySelection, selection{keyIndex, req})
 			continue
 		}
 
 		// single
-		addr, _ := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, true)
+		addr, _ := acc.setts.AddrGen(keyIndex, req.SecurityLevel, true)
 		primaryAddrs = append(primaryAddrs, addr)
 		primarySelection = append(primarySelection, selection{keyIndex, req})
 	}

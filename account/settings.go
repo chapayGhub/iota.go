@@ -5,8 +5,11 @@ import (
 	"github.com/iotaledger/iota.go/account/store"
 	"github.com/iotaledger/iota.go/account/store/inmemory"
 	"github.com/iotaledger/iota.go/account/timesrc"
+	"github.com/iotaledger/iota.go/address"
 	"github.com/iotaledger/iota.go/api"
+	"github.com/iotaledger/iota.go/bundle"
 	"github.com/iotaledger/iota.go/consts"
+	"github.com/iotaledger/iota.go/trinary"
 	"strings"
 )
 
@@ -15,6 +18,33 @@ import (
 // The InputSelectionFunc must obey to the rules of conditional deposit requests to ensure consistency.
 // It returns the computed balance/transfer value, inputs and the key indices to remove from the store.
 type InputSelectionFunc func(acc *account, transferValue uint64, balanceCheck bool) (uint64, []api.Input, []uint64, error)
+
+// AddrGenFunc defines a function which given the index, security level and addChecksum flag, generates a new address.
+type AddrGenFunc func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) (trinary.Hash, error)
+
+// PrepareTransfersFunc defines a function which prepares the transaction trytes by generating a bundle,
+// filling in transfers and inputs, adding the remainder address and signing all input transactions.
+type PrepareTransfersFunc func(transfers bundle.Transfers, options api.PrepareTransfersOptions) ([]trinary.Trytes, error)
+
+func DefaultAddrGen(provider SeedProvider) AddrGenFunc {
+	return func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) (trinary.Hash, error) {
+		seed, err := provider.Seed()
+		if err != nil {
+			return "", err
+		}
+		return address.GenerateAddress(seed, index, secLvl, addChecksum)
+	}
+}
+
+func DefaultPrepareTransfers(a *api.API, provider SeedProvider) PrepareTransfersFunc {
+	return func(transfers bundle.Transfers, options api.PrepareTransfersOptions) ([]trinary.Trytes, error) {
+		seed, err := provider.Seed()
+		if err != nil {
+			return nil, err
+		}
+		return a.PrepareTransfers(seed, transfers, options)
+	}
+}
 
 // Settings defines settings used by an account.
 type Settings struct {
@@ -28,6 +58,8 @@ type Settings struct {
 	InputSelectionStrat InputSelectionFunc
 	EventMachine        event.EventMachine
 	Plugins             map[string]Plugin
+	AddrGen             AddrGenFunc
+	PrepareTransfers    PrepareTransfersFunc
 }
 
 var emptySeed = strings.Repeat("9", 81)

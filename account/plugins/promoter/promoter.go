@@ -40,20 +40,16 @@ type PromotionReattachmentEvent struct {
 
 // NewPromoter creates a new Promoter. If the interval is set to 0, the Promoter will only
 // promote/reattach through PromoteReattach().
-func NewPromoter(
-	api *api.API, store store.Store, eventMachine event.EventMachine, timesource timesrc.TimeSource,
-	interval time.Duration, depth uint64, mwm uint64,
-) *Promoter {
-	if eventMachine == nil {
-		eventMachine = &event.DiscardEventMachine{}
+func NewPromoter(setts *account.Settings, interval time.Duration) *Promoter {
+	if setts.EventMachine == nil {
+		setts.EventMachine = &event.DiscardEventMachine{}
 	}
 	promoter := &Promoter{
-		interval: interval, em: eventMachine, timeSource: timesource,
-		api: api, store: store, depth: depth, mwm: mwm,
+		interval: interval, setts: setts,
 		tailCache: make(map[string]*transaction.Transaction),
 	}
 	promoter.syncTimer = util.NewSyncIntervalTimer(interval, promoter.promote, func(err error) {
-		promoter.em.Emit(err, event.EventError)
+		promoter.setts.EventMachine.Emit(err, event.EventError)
 	})
 	return promoter
 }
@@ -62,16 +58,12 @@ func NewPromoter(
 // to get confirmed by issuing promotion transactions and creating reattachments.
 // The Promoter will only run one promotion/reattachment task at any given time.
 type Promoter struct {
-	interval   time.Duration
-	api        *api.API
-	store      store.Store
-	em         event.EventMachine
-	timeSource timesrc.TimeSource
-	depth      uint64
-	mwm        uint64
-	acc        account.Account
-	tailCache  map[string]*transaction.Transaction
-	syncTimer  *util.SyncIntervalTimer
+	interval  time.Duration
+	setts     *account.Settings
+	api       *api.API
+	acc       account.Account
+	tailCache map[string]*transaction.Transaction
+	syncTimer *util.SyncIntervalTimer
 }
 
 func (p *Promoter) Name() string {
@@ -116,16 +108,15 @@ var emptySeed = strings.Repeat("9", 81)
 var ErrUnpromotableTail = errors.New("tail is unpromoteable")
 
 func (p *Promoter) promote() error {
-	pendingTransfers, err := p.store.GetPendingTransfers(p.acc.ID())
+	pendingTransfers, err := p.setts.Store.GetPendingTransfers(p.acc.ID())
 	if err != nil {
 		return err
 	}
 	if len(pendingTransfers) == 0 {
 		return nil
 	}
-
 	send := func(preparedBundle []Trytes, tips *api.TransactionsToApprove) (Hash, error) {
-		readyBundle, err := p.api.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, p.mwm, preparedBundle)
+		readyBundle, err := p.api.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, p.setts.MWM, preparedBundle)
 		if err != nil {
 			return "", errors.Wrap(err, "performing PoW for promote/reattach cycle bundle failed")
 		}
@@ -141,7 +132,7 @@ func (p *Promoter) promote() error {
 	}
 
 	promote := func(tailTx Hash) (Hash, error) {
-		depth := p.depth
+		depth := p.setts.Depth
 		for {
 			tips, err := p.api.GetTransactionsToApprove(depth, tailTx)
 			if err != nil {
@@ -164,7 +155,7 @@ func (p *Promoter) promote() error {
 	}
 
 	reattach := func(essenceBndl bundle.Bundle) (Hash, error) {
-		tips, err := p.api.GetTransactionsToApprove(p.depth)
+		tips, err := p.api.GetTransactionsToApprove(p.setts.Depth)
 		if err != nil {
 			return "", errors.Wrapf(err, "unable to GTTA for reattachment in promote/reattach cycle (bundle %s)", essenceBndl[0].Bundle)
 		}
@@ -180,7 +171,7 @@ func (p *Promoter) promote() error {
 	}
 
 	storeTailTxHash := func(key string, tailTxHash string, msg string) error {
-		if err := p.store.AddTailHash(p.acc.ID(), key, tailTxHash); err != nil {
+		if err := p.setts.Store.AddTailHash(p.acc.ID(), key, tailTxHash); err != nil {
 			if err == store.ErrPendingTransferNotFound {
 				// might have been removed by polling goroutine
 				return nil
@@ -231,7 +222,7 @@ func (p *Promoter) promote() error {
 				p.tailCache[tailTx] = tx
 			}
 
-			if above, err := aboveMaxDepth(p.timeSource, time.Unix(int64(tx.Timestamp), 0)); !above || err != nil {
+			if above, err := aboveMaxDepth(p.setts.TimeSource, time.Unix(int64(tx.Timestamp), 0)); !above || err != nil {
 				continue
 			}
 
@@ -249,7 +240,7 @@ func (p *Promoter) promote() error {
 			if err != nil {
 				return errors.Wrapf(err, "unable to translate pending transfer to bundle for reattachment")
 			}
-			p.em.Emit(&PromotionReattachmentEvent{
+			p.setts.EventMachine.Emit(&PromotionReattachmentEvent{
 				BundleHash:          bndl[0].Bundle,
 				PromotionTailTxHash: promoteTailTxHash,
 				OriginTailTxHash:    key,
@@ -268,7 +259,7 @@ func (p *Promoter) promote() error {
 		if err != nil {
 			return errors.Wrap(ErrUnableToReattach, err.Error())
 		}
-		p.em.Emit(&PromotionReattachmentEvent{
+		p.setts.EventMachine.Emit(&PromotionReattachmentEvent{
 			BundleHash:             bndl[0].Bundle,
 			OriginTailTxHash:       key,
 			ReattachmentTailTxHash: reattachTailTxHash,
@@ -282,7 +273,7 @@ func (p *Promoter) promote() error {
 		if err != nil {
 			return errors.Wrap(ErrUnableToPromote, err.Error())
 		}
-		p.em.Emit(&PromotionReattachmentEvent{
+		p.setts.EventMachine.Emit(&PromotionReattachmentEvent{
 			BundleHash:          bndl[0].Bundle,
 			OriginTailTxHash:    key,
 			PromotionTailTxHash: promoteTailTxHash,

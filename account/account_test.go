@@ -71,10 +71,7 @@ var _ = Describe("account", func() {
 	newAccount := func() {
 		st = inmemory.NewInMemoryStore()
 		em = event.NewEventMachine()
-		transferPoller = poller.NewTransferPoller(
-			api, st, em,
-			account.NewInMemorySeedProvider(seed), poller.NewPerTailReceiveEventFilter(), 0)
-		acc, err = builder.NewBuilder().
+		b := builder.NewBuilder().
 			WithAPI(api).
 			WithStore(st).
 			WithDepth(3).
@@ -82,9 +79,10 @@ var _ = Describe("account", func() {
 			WithSecurityLevel(usedSecLvl).
 			WithTimeSource(&fakeclock{}).
 			WithEvents(em).
-			WithPlugins(transferPoller).
-			WithSeed(seed).
-			Build()
+			WithSeed(seed)
+		
+		transferPoller = poller.NewTransferPoller(b.Settings(), poller.NewPerTailReceiveEventFilter(), 0)
+		acc, err = b.Build(transferPoller)
 		if err != nil {
 			panic(err)
 		}

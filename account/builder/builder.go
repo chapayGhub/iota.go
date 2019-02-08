@@ -26,16 +26,24 @@ type Builder struct {
 	settings *account.Settings
 }
 
-// Build creates the account from the given settings.
-func (b *Builder) Build() (account.Account, error) {
+// Build adds the given plugins and creates the account.
+func (b *Builder) Build(plugins ...account.Plugin) (account.Account, error) {
+	for _, p := range plugins {
+		b.settings.Plugins[p.Name()] = p
+	}
+	if b.settings.AddrGen == nil {
+		b.settings.AddrGen = account.DefaultAddrGen(b.settings.SeedProv)
+	}
+	if b.settings.PrepareTransfers == nil {
+		b.settings.PrepareTransfers = account.DefaultPrepareTransfers(b.settings.API, b.settings.SeedProv)
+	}
 	settsCopy := *b.settings
 	return account.NewAccount(&settsCopy)
 }
 
 // Settings returns the currently built settings.
-func (b *Builder) Settings() (*account.Settings) {
-	settsCopy := *b.settings
-	return &settsCopy
+func (b *Builder) Settings() *account.Settings {
+	return b.settings
 }
 
 // API sets the underlying API to use.
@@ -53,6 +61,18 @@ func (b *Builder) WithStore(store store.Store) *Builder {
 // SeedProvider sets the underlying SeedProvider to use.
 func (b *Builder) WithSeedProvider(seedProv account.SeedProvider) *Builder {
 	b.settings.SeedProv = seedProv
+	return b
+}
+
+// WithAddrGenFunc sets the address generation function to use.
+func (b *Builder) WithAddrGenFunc(f account.AddrGenFunc) *Builder {
+	b.settings.AddrGen = f
+	return b
+}
+
+// WithPrepareTransfersFunc sets the prepare transfers function to use.
+func (b *Builder) WithPrepareTransfersFunc(f account.PrepareTransfersFunc) *Builder {
+	b.settings.PrepareTransfers = f
 	return b
 }
 
@@ -97,29 +117,18 @@ func (b *Builder) WithInputSelectionStrategy(strat account.InputSelectionFunc) *
 // poll incoming/outgoing transfers every 30 seconds (filter by tail tx hash).
 // promote/reattach each pending transfer every 30 seconds.
 //
-// This function should only be called after following settings are initialized:
-// api, store, mwm, depth, event machine, time source, seed provider.
+// This function must only be called after following settings are initialized:
+// API, Store, MWM, Depth, SeedProvider or AddrGen+PrepareTransfers, TimeSource and EventMachine.
 func (b *Builder) WithDefaultPlugins() *Builder {
 	transferPoller := poller.NewTransferPoller(
-		b.settings.API, b.settings.Store, b.settings.EventMachine,
-		b.settings.SeedProv, poller.NewPerTailReceiveEventFilter(true),
+		b.settings, poller.NewPerTailReceiveEventFilter(true),
 		time.Duration(30)*time.Second,
 	)
-	promoterReattacher := promoter.NewPromoter(
-		b.settings.API, b.settings.Store, b.settings.EventMachine, b.settings.TimeSource,
-		time.Duration(30)*time.Second,
-		b.settings.Depth, b.settings.MWM)
+
+	promoterReattacher := promoter.NewPromoter(b.settings, time.Duration(30)*time.Second)
 
 	b.settings.Plugins[transferPoller.Name()] = transferPoller
 	b.settings.Plugins[promoterReattacher.Name()] = promoterReattacher
-	return b
-}
-
-// WithPlugins adds the given plugins to use.
-func (b *Builder) WithPlugins(plugins ...account.Plugin) *Builder {
-	for _, p := range plugins {
-		b.settings.Plugins[p.Name()] = p
-	}
 	return b
 }
 

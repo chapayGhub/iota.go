@@ -5,8 +5,6 @@ import (
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
 	"github.com/iotaledger/iota.go/account/util"
-	"github.com/iotaledger/iota.go/address"
-	"github.com/iotaledger/iota.go/api"
 	"github.com/iotaledger/iota.go/bundle"
 	. "github.com/iotaledger/iota.go/trinary"
 	"github.com/pkg/errors"
@@ -34,23 +32,18 @@ const (
 
 // NewTransferPoller creates a new TransferPoller. If the interval is set to 0, the TransferPoller will only
 // poll through Poll().
-func NewTransferPoller(
-	api *api.API, store store.Store, eventMachine event.EventMachine,
-	seedProv account.SeedProvider, receiveEventFilter ReceiveEventFilter, interval time.Duration,
-) *TransferPoller {
-	if eventMachine == nil {
-		eventMachine = &event.DiscardEventMachine{}
+func NewTransferPoller(setts *account.Settings, filter ReceiveEventFilter, interval time.Duration) *TransferPoller {
+	if setts.EventMachine == nil {
+		setts.EventMachine = &event.DiscardEventMachine{}
 	}
-	if receiveEventFilter == nil {
-		receiveEventFilter = NewPerTailReceiveEventFilter(true)
+	if filter == nil {
+		filter = NewPerTailReceiveEventFilter(true)
 	}
 	poller := &TransferPoller{
-		api: api, store: store,
-		receiveEventFilter: receiveEventFilter,
-		em:                 eventMachine, seedProvider: seedProv,
+		setts: setts, receiveEventFilter: filter,
 	}
 	poller.syncTimer = util.NewSyncIntervalTimer(interval, poller.pollTransfers, func(err error) {
-		poller.em.Emit(err, event.EventError)
+		poller.setts.EventMachine.Emit(err, event.EventError)
 	})
 	return poller
 }
@@ -58,10 +51,7 @@ func NewTransferPoller(
 // TransferPoller is an account plugin which takes care of checking pending transfers for confirmation
 // and checking incoming transfers.
 type TransferPoller struct {
-	api                *api.API
-	store              store.Store
-	em                 event.EventMachine
-	seedProvider       account.SeedProvider
+	setts              *account.Settings
 	receiveEventFilter ReceiveEventFilter
 	acc                account.Account
 	syncTimer          *util.SyncIntervalTimer
@@ -93,12 +83,12 @@ func (tp *TransferPoller) Shutdown() error {
 }
 
 func (tp *TransferPoller) pollTransfers() error {
-	pendingTransfers, err := tp.store.GetPendingTransfers(tp.acc.ID())
+	pendingTransfers, err := tp.setts.Store.GetPendingTransfers(tp.acc.ID())
 	if err != nil {
 		return errors.Wrap(err, "unable to load pending transfers for polling transfers")
 	}
 
-	depositRequests, err := tp.store.GetDepositRequests(tp.acc.ID())
+	depositRequests, err := tp.setts.Store.GetDepositRequests(tp.acc.ID())
 	if err != nil {
 		return errors.Wrap(err, "unable to load deposit requests for polling transfers")
 	}
@@ -134,7 +124,7 @@ func (tp *TransferPoller) checkOutgoingTransfers(pendingTransfers map[string]*st
 		if len(pendingTransfer.Tails) == 0 {
 			continue
 		}
-		states, err := tp.api.GetLatestInclusion(pendingTransfer.Tails)
+		states, err := tp.setts.API.GetLatestInclusion(pendingTransfer.Tails)
 		if err != nil {
 			return errors.Wrapf(err, "unable to check latest inclusion state in outgoing transfers op. (first tail tx of bundle: %s)", tailTx)
 		}
@@ -144,12 +134,12 @@ func (tp *TransferPoller) checkOutgoingTransfers(pendingTransfers map[string]*st
 				continue
 			}
 			// fetch bundle to emit it in the event
-			bndl, err := tp.api.GetBundle(pendingTransfer.Tails[i])
+			bndl, err := tp.setts.API.GetBundle(pendingTransfer.Tails[i])
 			if err != nil {
 				return errors.Wrapf(err, "unable to get bundle in outgoing transfers op. (first tail tx of bundle: %s) of tail %s", tailTx, pendingTransfer.Tails[i])
 			}
-			tp.em.Emit(bndl, EventTransferConfirmed)
-			if err := tp.store.RemovePendingTransfer(tp.acc.ID(), tailTx); err != nil {
+			tp.setts.EventMachine.Emit(bndl, EventTransferConfirmed)
+			if err := tp.setts.Store.RemovePendingTransfer(tp.acc.ID(), tailTx); err != nil {
 				return errors.Wrap(err, "unable to remove confirmed transfer from store in outgoing transfers op.")
 			}
 			break
@@ -163,16 +153,11 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 		return nil
 	}
 
-	seed, err := tp.seedProvider.Seed()
-	if err != nil {
-		return errors.Wrap(err, "unable to get seed from seed provider in incoming transfers op.")
-	}
-
 	depositAddresses := make(StringSet)
 	depAddrs := make(Hashes, len(depositRequests))
 	var i int
 	for keyIndex, req := range depositRequests {
-		addr, err := address.GenerateAddress(seed, keyIndex, req.SecurityLevel, false)
+		addr, err := tp.setts.AddrGen(keyIndex, req.SecurityLevel, false)
 		if err != nil {
 			return errors.Wrap(err, "unable to compute deposit address in incoming transfers op.")
 		}
@@ -195,13 +180,13 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 	}
 
 	// get all bundles which operated on the current deposit addresses
-	bndls, err := tp.api.GetBundlesFromAddresses(depAddrs, true)
+	bndls, err := tp.setts.API.GetBundlesFromAddresses(depAddrs, true)
 	if err != nil {
 		return errors.Wrap(err, "unable to fetch bundles from deposit addresses in incoming transfers op.")
 	}
 
 	// create the events to emit in the event system
-	tp.receiveEventFilter(tp.em, bndls, depositAddresses, spentAddresses)
+	tp.receiveEventFilter(tp.setts.EventMachine, bndls, depositAddresses, spentAddresses)
 	return nil
 }
 
