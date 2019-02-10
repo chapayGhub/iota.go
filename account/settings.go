@@ -26,6 +26,7 @@ type AddrGenFunc func(index uint64, secLvl consts.SecurityLevel, addChecksum boo
 // filling in transfers and inputs, adding the remainder address and signing all input transactions.
 type PrepareTransfersFunc func(transfers bundle.Transfers, options api.PrepareTransfersOptions) ([]trinary.Trytes, error)
 
+// DefaultAddrGen is the default address generation function used by the account, if non is specified.
 func DefaultAddrGen(provider SeedProvider) AddrGenFunc {
 	return func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) (trinary.Hash, error) {
 		seed, err := provider.Seed()
@@ -36,6 +37,7 @@ func DefaultAddrGen(provider SeedProvider) AddrGenFunc {
 	}
 }
 
+// DefaultPrepareTransfers is the default prepare transfers function used by the account, if non is specified.
 func DefaultPrepareTransfers(a *api.API, provider SeedProvider) PrepareTransfersFunc {
 	return func(transfers bundle.Transfers, options api.PrepareTransfersOptions) ([]trinary.Trytes, error) {
 		seed, err := provider.Seed()
@@ -47,6 +49,7 @@ func DefaultPrepareTransfers(a *api.API, provider SeedProvider) PrepareTransfers
 }
 
 // Settings defines settings used by an account.
+// The settings must not be mutated after an account was started.
 type Settings struct {
 	API                 *api.API
 	Store               store.Store

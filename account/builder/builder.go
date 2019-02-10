@@ -28,14 +28,14 @@ type Builder struct {
 
 // Build adds the given plugins and creates the account.
 func (b *Builder) Build(plugins ...account.Plugin) (account.Account, error) {
-	for _, p := range plugins {
-		b.settings.Plugins[p.Name()] = p
-	}
 	if b.settings.AddrGen == nil {
 		b.settings.AddrGen = account.DefaultAddrGen(b.settings.SeedProv)
 	}
 	if b.settings.PrepareTransfers == nil {
 		b.settings.PrepareTransfers = account.DefaultPrepareTransfers(b.settings.API, b.settings.SeedProv)
+	}
+	for _, p := range plugins {
+		b.settings.Plugins[p.Name()] = p
 	}
 	settsCopy := *b.settings
 	return account.NewAccount(&settsCopy)

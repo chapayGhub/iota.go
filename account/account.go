@@ -227,8 +227,7 @@ func (acc *account) UpdateSettings(setts *Settings) error {
 	}
 
 	// make a copy
-	settingsCopy := *setts
-	acc.setts = &settingsCopy
+	acc.setts = setts
 
 	// continue polling goroutines
 	if err := acc.startPlugins(); err != nil {

@@ -60,7 +60,6 @@ func NewPromoter(setts *account.Settings, interval time.Duration) *Promoter {
 type Promoter struct {
 	interval  time.Duration
 	setts     *account.Settings
-	api       *api.API
 	acc       account.Account
 	tailCache map[string]*transaction.Transaction
 	syncTimer *util.SyncIntervalTimer
@@ -116,11 +115,11 @@ func (p *Promoter) promote() error {
 		return nil
 	}
 	send := func(preparedBundle []Trytes, tips *api.TransactionsToApprove) (Hash, error) {
-		readyBundle, err := p.api.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, p.setts.MWM, preparedBundle)
+		readyBundle, err := p.setts.API.AttachToTangle(tips.TrunkTransaction, tips.BranchTransaction, p.setts.MWM, preparedBundle)
 		if err != nil {
 			return "", errors.Wrap(err, "performing PoW for promote/reattach cycle bundle failed")
 		}
-		readyBundle, err = p.api.StoreAndBroadcast(readyBundle)
+		readyBundle, err = p.setts.API.StoreAndBroadcast(readyBundle)
 		if err != nil {
 			return "", errors.Wrap(err, "unable to store/broadcast bundle in promote/reattach cycle")
 		}
@@ -134,7 +133,7 @@ func (p *Promoter) promote() error {
 	promote := func(tailTx Hash) (Hash, error) {
 		depth := p.setts.Depth
 		for {
-			tips, err := p.api.GetTransactionsToApprove(depth, tailTx)
+			tips, err := p.setts.API.GetTransactionsToApprove(depth, tailTx)
 			if err != nil {
 				if err.Error() == referenceTooOldMsg {
 					depth++
@@ -146,7 +145,7 @@ func (p *Promoter) promote() error {
 				return "", err
 			}
 			pTransfers := bundle.Transfers{bundle.EmptyTransfer}
-			preparedBundle, err := p.api.PrepareTransfers(emptySeed, pTransfers, api.PrepareTransfersOptions{})
+			preparedBundle, err := p.setts.API.PrepareTransfers(emptySeed, pTransfers, api.PrepareTransfersOptions{})
 			if err != nil {
 				return "", errors.Wrap(err, "unable to prepare promotion bundle")
 			}
@@ -155,7 +154,7 @@ func (p *Promoter) promote() error {
 	}
 
 	reattach := func(essenceBndl bundle.Bundle) (Hash, error) {
-		tips, err := p.api.GetTransactionsToApprove(p.setts.Depth)
+		tips, err := p.setts.API.GetTransactionsToApprove(p.setts.Depth)
 		if err != nil {
 			return "", errors.Wrapf(err, "unable to GTTA for reattachment in promote/reattach cycle (bundle %s)", essenceBndl[0].Bundle)
 		}
@@ -201,7 +200,7 @@ func (p *Promoter) promote() error {
 
 			tx, isCached := p.tailCache[tailTx]
 			if !isCached {
-				consistent, _, err := p.api.CheckConsistency(tailTx)
+				consistent, _, err := p.setts.API.CheckConsistency(tailTx)
 				if err != nil {
 					continue
 				}
@@ -210,7 +209,7 @@ func (p *Promoter) promote() error {
 					continue
 				}
 
-				txTrytes, err := p.api.GetTrytes(tailTx)
+				txTrytes, err := p.setts.API.GetTrytes(tailTx)
 				if err != nil {
 					continue
 				}
