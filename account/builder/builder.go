@@ -29,7 +29,7 @@ type Builder struct {
 // Build adds the given plugins and creates the account.
 func (b *Builder) Build(plugins ...account.Plugin) (account.Account, error) {
 	if b.settings.AddrGen == nil {
-		b.settings.AddrGen = account.DefaultAddrGen(b.settings.SeedProv)
+		b.settings.AddrGen = account.DefaultAddrGen(b.settings.SeedProv, true)
 	}
 	if b.settings.PrepareTransfers == nil {
 		b.settings.PrepareTransfers = account.DefaultPrepareTransfers(b.settings.API, b.settings.SeedProv)

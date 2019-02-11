@@ -11,6 +11,7 @@ import (
 	"github.com/iotaledger/iota.go/consts"
 	"github.com/iotaledger/iota.go/trinary"
 	"strings"
+	"sync"
 )
 
 // InputSelectionFunc defines a function which given the account, transfer value and the flag balance check,
@@ -27,13 +28,83 @@ type AddrGenFunc func(index uint64, secLvl consts.SecurityLevel, addChecksum boo
 type PrepareTransfersFunc func(transfers bundle.Transfers, options api.PrepareTransfersOptions) ([]trinary.Trytes, error)
 
 // DefaultAddrGen is the default address generation function used by the account, if non is specified.
-func DefaultAddrGen(provider SeedProvider) AddrGenFunc {
-	return func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) (trinary.Hash, error) {
+// withCache creates a function which caches the computed addresses by the index and security level for subsequent calls.
+func DefaultAddrGen(provider SeedProvider, withCache bool) AddrGenFunc {
+	var cacheMu sync.Mutex
+	var cache map[uint64]map[consts.SecurityLevel]trinary.Hash
+
+	if withCache {
+		cache = map[uint64]map[consts.SecurityLevel]trinary.Hash{}
+	}
+
+	read := func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) trinary.Hash {
+		cacheMu.Lock()
+		defer cacheMu.Unlock()
+		m, hasEntry := cache[index]
+		if !hasEntry {
+			return ""
+		}
+		cachedAddr, hasAddr := m[secLvl]
+		if !hasAddr {
+			return ""
+		}
+		if addChecksum {
+			return cachedAddr
+		}
+		return cachedAddr[:consts.HashTrytesSize]
+	}
+
+	write := func(index uint64, secLvl consts.SecurityLevel, addr trinary.Hash) {
+		cacheMu.Lock()
+		defer cacheMu.Unlock()
+		m, hasEntry := cache[index]
+		if !hasEntry {
+			m = map[consts.SecurityLevel]trinary.Hash{}
+			m[secLvl] = addr
+			cache[index] = m
+			return
+		}
+		m[secLvl] = addr
+	}
+
+	generate := func(index uint64, secLvl consts.SecurityLevel) (trinary.Hash, error) {
 		seed, err := provider.Seed()
 		if err != nil {
 			return "", err
 		}
-		return address.GenerateAddress(seed, index, secLvl, addChecksum)
+
+		addr, err := address.GenerateAddress(seed, index, secLvl, true)
+		return addr, err
+	}
+
+	if !withCache {
+		return func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) (trinary.Hash, error) {
+			addr, err := generate(index, secLvl)
+			if err != nil {
+				return "", err
+			}
+			if addChecksum {
+				return addr, nil
+			}
+			return addr[:consts.HashTrytesSize], nil
+		}
+	}
+
+	return func(index uint64, secLvl consts.SecurityLevel, addChecksum bool) (trinary.Hash, error) {
+		if hash := read(index, secLvl, addChecksum); hash != "" {
+			return hash, nil
+		}
+
+		addr, err := generate(index, secLvl)
+		if err != nil {
+			return "", err
+		}
+
+		write(index, secLvl, addr)
+		if addChecksum {
+			return addr, nil
+		}
+		return addr[:consts.HashTrytesSize], nil
 	}
 }
 

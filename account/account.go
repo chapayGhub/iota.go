@@ -92,7 +92,7 @@ func initFuncs(setts *Settings) error {
 			return err
 		}
 		if setts.AddrGen == nil {
-			setts.AddrGen = DefaultAddrGen(setts.SeedProv)
+			setts.AddrGen = DefaultAddrGen(setts.SeedProv, true)
 		}
 		if setts.PrepareTransfers == nil {
 			setts.PrepareTransfers = DefaultPrepareTransfers(setts.API, setts.SeedProv)
@@ -572,7 +572,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 	toQuery := append(primaryAddrs, secondaryAddrs...)
 	balances, err := acc.setts.API.GetBalances(toQuery, 100, subtangleHash)
 	if err != nil {
-		return 0, nil, nil, errors.Wrap(err, "unable to fetch balances of primary selected addresses for input selection")
+		return 0, nil, nil, errors.Wrap(err, "unable to fetch balances of primary/secondary selected addresses for input selection")
 	}
 
 	inputs := []api.Input{}
@@ -592,6 +592,9 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 			continue
 		}
 		sum += balances.Balances[i]
+		if balanceCheck {
+			continue
+		}
 
 		// add the address as an input
 		if balances.Balances[i] == 0 {
@@ -606,7 +609,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 		// mark the address for removal as it should be freed from the store
 		markForRemoval(s.keyIndex)
-		if sum >= transferValue && !balanceCheck {
+		if sum >= transferValue {
 			break
 		}
 	}
@@ -624,7 +627,7 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 
 			// remove if there's no incoming consistent transfer
 			// and the balance is zero in order free up the store
-			if balance == 0 {
+			if balance == 0 && !balanceCheck {
 				// check whether the timed out address has an incoming consistent value transfer,
 				// and if so, don't remove it from the store
 				if has, err := acc.hasIncomingConsistentValueTransfer(addr); has || err != nil {
@@ -633,15 +636,18 @@ func defaultInputSelection(acc *account, transferValue uint64, balanceCheck bool
 				markForRemoval(secSelect.keyIndex)
 				continue
 			}
-			markForRemoval(secSelect.keyIndex)
 			sum += balance
+			if balanceCheck {
+				continue
+			}
+			markForRemoval(secSelect.keyIndex)
 			addAsInput(&api.Input{
 				KeyIndex: secSelect.keyIndex,
 				Address:  addr,
 				Security: secSelect.req.SecurityLevel,
 				Balance:  balance,
 			})
-			if sum >= transferValue && !balanceCheck {
+			if sum >= transferValue {
 				break
 			}
 		}
