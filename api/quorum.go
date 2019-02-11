@@ -213,6 +213,7 @@ var subMileIndexKey = [34]byte{108, 97, 116, 101, 115, 116, 83, 111, 108, 105, 1
 var durationKey = [11]byte{34, 100, 117, 114, 97, 116, 105, 111, 110, 34, 58}
 var infoKey = [7]byte{34, 105, 110, 102, 111, 34, 58}
 var emptyInfoKey = [9]byte{34, 105, 110, 102, 111, 34, 58, 34, 34}
+var milestoneIndexKey = [14]byte{109, 105, 108, 101, 115, 116, 111, 110, 101, 73, 110, 100, 101, 120}
 
 const (
 	commaAscii             = 44
@@ -345,6 +346,19 @@ func sliceOutInfoField(data []byte) []byte {
 	c := make([]byte, len(data))
 	copy(c, data)
 	return append(c[:infoIndex-1], closingCurlyBraceAscii)
+}
+
+// slices out a byte slice without the milestone index field for get balances calls.
+// even when querying multiple nodes with the same reference, the IRI node's latest snapshot index
+// is returned in the response, which must thereby be filtered out.
+func sliceOutMilestoneIndexField(data []byte) []byte {
+	indexOfMilestoneIndex := bytes.LastIndex(data, milestoneIndexKey[:])
+	if indexOfMilestoneIndex == -1 {
+		return data
+	}
+	c := make([]byte, len(data))
+	copy(c, data)
+	return append(c[:indexOfMilestoneIndex-2], closingCurlyBraceAscii)
 }
 
 type quorumcheck struct {
@@ -516,6 +530,10 @@ func (hc *quorumhttpclient) Send(cmd interface{}, out interface{}) error {
 			var hash uint64
 
 			switch cmd.(type) {
+			case *GetBalancesCommand:
+				// get balances responses contain the latest milestone index of the given node,
+				// thereby it needs to be removed for hashing the result correctly
+				hash = xxhash.Sum64(sliceOutMilestoneIndexField(data))
 			case *FindTransactionsCommand:
 				// as findTransactions responses don't guarantee ordering, we just simply
 				// sum up the bytes of the reduced response. it's highly unlikely that responses
@@ -532,8 +550,7 @@ func (hc *quorumhttpclient) Send(cmd interface{}, out interface{}) error {
 				// we slice out the info field from check consistency calls
 				// but use whatever first info response was given when actually
 				// returning the result from this API call
-				cleaned := sliceOutInfoField(data)
-				hash = xxhash.Sum64(cleaned)
+				hash = xxhash.Sum64(sliceOutInfoField(data))
 			default:
 				hash = xxhash.Sum64(data)
 			}
