@@ -278,7 +278,10 @@ func (ms *MongoStore) AddTailHash(id string, originTailTxHash trinary.Hash, newT
 	mutation := bson.D{
 		{"$addToSet", bson.D{{"pending_transfers." + originTailTxHash + ".tails", newTailTxHash}}},
 	}
-	_, err := ms.coll.UpdateOne(ms.cnf.ContextProvider(), bson.D{{"_id", id}}, mutation)
+	_, err := ms.coll.UpdateOne(ms.cnf.ContextProvider(), bson.D{
+		{"_id", id},
+		{"pending_transfers." + originTailTxHash, bson.D{{"$exists", true}}},
+	}, mutation)
 	if err != nil {
 		return err
 	}
