@@ -29,7 +29,11 @@ const (
 
 // AsMagnetLink converts the conditions into a magnet link URL.
 func (dc *Conditions) AsMagnetLink() string {
-	return fmt.Sprintf("iota://%s/?t=%d&m=%v&am=%d", dc.Address, dc.TimeoutAt.Unix(), dc.MultiUse, dc.ExpectedAmount)
+	var expectedAmount uint64
+	if dc.ExpectedAmount != nil {
+		expectedAmount = *dc.ExpectedAmount
+	}
+	return fmt.Sprintf("iota://%s/?t=%d&m=%v&am=%d", dc.Address, dc.TimeoutAt.Unix(), dc.MultiUse, expectedAmount)
 }
 
 // AsTransfer converts the conditions into a transfer object.
