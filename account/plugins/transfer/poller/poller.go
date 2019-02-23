@@ -223,19 +223,6 @@ func NewPerTailReceiveEventFilter(skipFirst ...bool) ReceiveEventFilter {
 				continue
 			}
 
-			isTransferToOwnRemainderAddr := false
-
-			// filter transfers to remainder addresses by checking
-			// whether an input address is an own spent address
-			for i := range bndl {
-				if _, has := ownSpentAddrs[bndl[i].Address]; has && bndl[i].Value < 0 {
-					isTransferToOwnRemainderAddr = true
-					break
-				}
-			}
-			if isTransferToOwnRemainderAddr {
-				continue
-			}
 			tailTx := bundle.TailTransactionHash(bndl)
 			if *bndl[0].Persistence {
 				receivedBundles[tailTx] = bndl
