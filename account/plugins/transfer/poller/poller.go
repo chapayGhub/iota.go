@@ -157,6 +157,10 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 	depAddrs := make(Hashes, len(depositRequests))
 	var i int
 	for keyIndex, req := range depositRequests {
+		// filter remainder address bundles
+		if req.TimeoutAt == nil {
+			continue
+		}
 		addr, err := tp.setts.AddrGen(keyIndex, req.SecurityLevel, false)
 		if err != nil {
 			return errors.Wrap(err, "unable to compute deposit address in incoming transfers op.")
@@ -219,7 +223,6 @@ func NewPerTailReceiveEventFilter(skipFirst ...bool) ReceiveEventFilter {
 				continue
 			}
 
-			isSpendFromOwnAddr := false
 			isTransferToOwnRemainderAddr := false
 
 			// filter transfers to remainder addresses by checking
@@ -230,14 +233,7 @@ func NewPerTailReceiveEventFilter(skipFirst ...bool) ReceiveEventFilter {
 					break
 				}
 			}
-			// filter value transfers where a deposit address is an input
-			for i := range bndl {
-				if _, has := ownDepAddrs[bndl[i].Address]; has && bndl[i].Value < 0 {
-					isSpendFromOwnAddr = true
-					break
-				}
-			}
-			if isTransferToOwnRemainderAddr || isSpendFromOwnAddr {
+			if isTransferToOwnRemainderAddr {
 				continue
 			}
 			tailTx := bundle.TailTransactionHash(bndl)
