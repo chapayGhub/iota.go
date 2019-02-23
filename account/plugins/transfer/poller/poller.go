@@ -1,7 +1,6 @@
 package poller
 
 import (
-	"crypto"
 	"github.com/iotaledger/iota.go/account"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
