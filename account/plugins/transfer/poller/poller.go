@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"crypto"
 	"github.com/iotaledger/iota.go/account"
 	"github.com/iotaledger/iota.go/account/event"
 	"github.com/iotaledger/iota.go/account/store"
@@ -154,8 +155,7 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 	}
 
 	depositAddresses := make(StringSet)
-	depAddrs := make(Hashes, len(depositRequests))
-	var i int
+	depAddrs := make(Hashes, 0)
 	for keyIndex, req := range depositRequests {
 		// filter remainder address bundles
 		if req.TimeoutAt == nil {
@@ -165,8 +165,7 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 		if err != nil {
 			return errors.Wrap(err, "unable to compute deposit address in incoming transfers op.")
 		}
-		depAddrs[i] = addr
-		i++
+		depAddrs = append(depAddrs, addr)
 		depositAddresses[addr] = struct{}{}
 	}
 	if len(depositAddresses) == 0 {
