@@ -169,6 +169,9 @@ func (tp *TransferPoller) checkIncomingTransfers(depositRequests map[uint64]*sto
 		i++
 		depositAddresses[addr] = struct{}{}
 	}
+	if len(depositAddresses) == 0 {
+		return nil
+	}
 
 	spentAddresses := make(StringSet)
 	for _, transfer := range pendingTransfers {
